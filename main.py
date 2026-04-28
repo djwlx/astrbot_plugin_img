@@ -1,104 +1,83 @@
-import asyncio
-import json
 import logging
-import math
-import os
-import uuid
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-import aiohttp
 from astrbot.api.event import AstrMessageEvent, filter
-from astrbot.api.message_components import Image
 from astrbot.api.star import Context, Star, register
 
-DATA_FILE = Path(__file__).parent / "config.json"
-TEMP_DIR = Path(__file__).parent / "temp"
-TELEGRAM_PHOTO_SAFE_SIDE_SUM = 9900
-TELEGRAM_PHOTO_SAFE_RATIO = 19.5
+from image_files import (
+    ImageFileService,
+    content_type_to_extension,
+    safe_photo_canvas_size,
+)
+from message_sender import ImageMessageSender
+from settings import (
+    DEFAULT_ENABLE_COMPRESS_RETRY,
+    DEFAULT_ENABLE_IMAGE_COMPRESSION,
+    DEFAULT_RECALL_AFTER_SECONDS,
+    LEGACY_DATA_FILE,
+    LEGACY_TRIGGER_DATA_FILENAME,
+    PLUGIN_NAME,
+    PLUGIN_VERSION,
+    TRIGGER_DATA_FILENAME,
+    read_bool_config,
+    read_non_negative_int_config,
+)
+from trigger_store import (
+    get_plugin_data_dir,
+    is_http_url,
+    load_trigger_map,
+    migrate_legacy_trigger_data,
+    normalize_trigger,
+    save_trigger_map,
+)
 
 logger = logging.getLogger(__name__)
 
-CONTENT_TYPE_EXTENSIONS = {
-    "image/jpeg": ".jpg",
-    "image/jpg": ".jpg",
-    "image/png": ".png",
-    "image/gif": ".gif",
-    "image/webp": ".webp",
-    "image/bmp": ".bmp",
-}
 
-
-def normalize_trigger(trigger: str) -> str:
-    return trigger.strip().lower()
-
-
-def is_http_url(url: str) -> bool:
-    return url.startswith(("http://", "https://"))
-
-
-def load_trigger_map(config_path: Path = DATA_FILE) -> Dict[str, str]:
-    if not config_path.exists():
-        return {}
-
-    try:
-        with open(config_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as exc:
-        logger.error("加载配置失败: %s", exc)
-        return {}
-
-    raw_map = data.get("trigger_map", {})
-    if not isinstance(raw_map, dict):
-        return {}
-
-    return {
-        normalize_trigger(trigger): url.strip()
-        for trigger, url in raw_map.items()
-        if (
-            isinstance(trigger, str)
-            and isinstance(url, str)
-            and normalize_trigger(trigger)
-            and is_http_url(url.strip())
-        )
-    }
-
-
-def save_trigger_map(trigger_map: Dict[str, str], config_path: Path = DATA_FILE) -> None:
-    data = {"trigger_map": trigger_map}
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
-
-
-def content_type_to_extension(content_type: str) -> str:
-    media_type = content_type.split(";", 1)[0].strip().lower()
-    return CONTENT_TYPE_EXTENSIONS.get(media_type, ".jpg")
-
-
-def safe_photo_canvas_size(width: int, height: int) -> Tuple[int, int]:
-    target_width = width
-    target_height = height
-
-    if target_width > target_height * TELEGRAM_PHOTO_SAFE_RATIO:
-        target_height = math.ceil(target_width / TELEGRAM_PHOTO_SAFE_RATIO)
-    elif target_height > target_width * TELEGRAM_PHOTO_SAFE_RATIO:
-        target_width = math.ceil(target_height / TELEGRAM_PHOTO_SAFE_RATIO)
-
-    side_sum = target_width + target_height
-    if side_sum > TELEGRAM_PHOTO_SAFE_SIDE_SUM:
-        scale = TELEGRAM_PHOTO_SAFE_SIDE_SUM / side_sum
-        target_width = max(1, math.floor(target_width * scale))
-        target_height = max(1, math.floor(target_height * scale))
-
-    return target_width, target_height
-
-
-@register("astrbot_plugin_img", "djwlx", "自定义图片触发词插件，仅支持直接图片URL", "v1.1.0")
+@register(PLUGIN_NAME, "djwlx", "自定义图片触发词插件，仅支持直接图片URL", PLUGIN_VERSION)
 class DirectImageTriggerPlugin(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: Any = None):
         super().__init__(context)
-        TEMP_DIR.mkdir(exist_ok=True)
-        self.trigger_map: Dict[str, str] = load_trigger_map()
+        self.config = config or {}
+        self.enable_image_compression = read_bool_config(
+            self.config,
+            "enable_image_compression",
+            DEFAULT_ENABLE_IMAGE_COMPRESSION,
+        )
+        self.enable_compress_retry = read_bool_config(
+            self.config,
+            "enable_compress_retry",
+            DEFAULT_ENABLE_COMPRESS_RETRY,
+        )
+        self.recall_after_seconds = read_non_negative_int_config(
+            self.config,
+            "recall_after_seconds",
+            DEFAULT_RECALL_AFTER_SECONDS,
+        )
+
+        self.data_dir = get_plugin_data_dir()
+        self.trigger_file = self.data_dir / TRIGGER_DATA_FILENAME
+        self.temp_dir = self.data_dir / "temp"
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
+
+        migrate_legacy_trigger_data(
+            [
+                self.data_dir / LEGACY_TRIGGER_DATA_FILENAME,
+                LEGACY_DATA_FILE,
+            ],
+            self.trigger_file,
+        )
+        self.trigger_map: Dict[str, str] = load_trigger_map(self.trigger_file)
+
+        self.image_files = ImageFileService(self.temp_dir)
+        self.sender = ImageMessageSender(
+            enable_compress_retry=self.enable_compress_retry,
+            recall_after_seconds=self.recall_after_seconds,
+            normalize_photo_dimensions=(
+                lambda path: self._normalize_photo_dimensions(path)
+            ),
+        )
 
     @filter.command("添加图片触发词")
     async def add_image_trigger(self, event: AstrMessageEvent, trigger: str, url: str):
@@ -113,7 +92,7 @@ class DirectImageTriggerPlugin(Star):
             return
 
         self.trigger_map[trigger_key] = image_url
-        save_trigger_map(self.trigger_map)
+        save_trigger_map(self.trigger_map, self.trigger_file)
         yield event.plain_result(f"已添加图片触发词: {trigger_key}")
 
     @filter.command("删除图片触发词")
@@ -124,7 +103,7 @@ class DirectImageTriggerPlugin(Star):
             return
 
         del self.trigger_map[trigger_key]
-        save_trigger_map(self.trigger_map)
+        save_trigger_map(self.trigger_map, self.trigger_file)
         yield event.plain_result(f"已删除图片触发词: {trigger_key}")
 
     @filter.command("图片触发词列表")
@@ -147,12 +126,31 @@ class DirectImageTriggerPlugin(Star):
         image_path, cleanup_paths = await self._prepare_image_file(
             self.trigger_map[trigger_key]
         )
-        if image_path:
-            yield event.chain_result([Image.fromFileSystem(image_path)])
+        if not image_path:
+            await self._safe_send_plain(event, "获取图片失败，请检查图片 URL 是否有效")
             event.stop_event()
+            return
+
+        send_result = None
+        try:
+            send_result = await self._send_image_path(event, image_path)
+        except Exception as exc:
+            logger.warning("发送原图失败: %s", exc)
+            send_result = await self._retry_compressed_image(
+                event,
+                image_path,
+                cleanup_paths,
+            )
+            if send_result is None:
+                await self._safe_send_plain(event, "发送图片失败，请稍后重试")
+
+        event.stop_event()
+        if cleanup_paths:
             self._schedule_cleanup(cleanup_paths)
-        else:
-            yield event.plain_result("获取图片失败，请检查图片 URL 是否有效")
+        self._schedule_recall(event, send_result)
+
+    async def terminate(self):
+        self.sender.cancel_pending_recalls()
 
     async def _prepare_image_file(self, url: str) -> Tuple[Optional[str], List[str]]:
         image_path = await self._download_direct_image(url)
@@ -160,6 +158,9 @@ class DirectImageTriggerPlugin(Star):
             return None, []
 
         cleanup_paths = [image_path]
+        if not self.enable_image_compression:
+            return image_path, cleanup_paths
+
         normalized_path = self._normalize_photo_dimensions(image_path)
         if normalized_path != image_path:
             cleanup_paths.append(normalized_path)
@@ -167,101 +168,42 @@ class DirectImageTriggerPlugin(Star):
         return normalized_path, cleanup_paths
 
     async def _download_direct_image(self, url: str) -> Optional[str]:
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    url,
-                    allow_redirects=True,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status != 200:
-                        return None
-
-                    content_type = resp.headers.get("Content-Type", "").lower()
-                    if not content_type.startswith("image/"):
-                        return None
-
-                    ext = content_type_to_extension(content_type)
-                    image_path = TEMP_DIR / f"{uuid.uuid4()}{ext}"
-                    data = await resp.read()
-                    with open(image_path, "wb") as f:
-                        f.write(data)
-                    return str(image_path)
-        except Exception as exc:
-            logger.error("获取图片失败: %s", exc)
-            return None
+        return await self.image_files.download_direct_image(url)
 
     def _normalize_photo_dimensions(self, image_path: str) -> str:
-        if image_path.lower().endswith(".gif"):
-            return image_path
+        return self.image_files.normalize_photo_dimensions(image_path)
 
-        try:
-            from PIL import Image as PILImage
-            from PIL import ImageOps, UnidentifiedImageError
-        except Exception as exc:
-            logger.warning("Pillow 未安装，跳过图片尺寸处理: %s", exc)
-            return image_path
+    async def _send_image_path(self, event: AstrMessageEvent, image_path: str):
+        return await self.sender.send_image_path(event, image_path)
 
-        try:
-            with PILImage.open(image_path) as image:
-                if getattr(image, "is_animated", False):
-                    return image_path
+    async def _safe_send_plain(self, event: AstrMessageEvent, text: str) -> None:
+        await self.sender.safe_send_plain(event, text)
 
-                image = ImageOps.exif_transpose(image)
-                width, height = image.size
-                if width <= 0 or height <= 0:
-                    return image_path
-
-                target_width, target_height = safe_photo_canvas_size(width, height)
-                needs_canvas = (target_width, target_height) != (width, height)
-                has_alpha = image.mode in ("RGBA", "LA") or (
-                    image.mode == "P" and "transparency" in image.info
-                )
-
-                if not needs_canvas:
-                    return image_path
-
-                image = image.convert("RGBA" if has_alpha else "RGB")
-                canvas_mode = "RGBA" if has_alpha else "RGB"
-                background = (255, 255, 255, 0) if has_alpha else (255, 255, 255)
-                canvas = PILImage.new(
-                    canvas_mode, (target_width, target_height), background
-                )
-
-                scale = min(target_width / width, target_height / height, 1)
-                resized_width = max(1, math.floor(width * scale))
-                resized_height = max(1, math.floor(height * scale))
-                if (resized_width, resized_height) != (width, height):
-                    image = image.resize(
-                        (resized_width, resized_height), PILImage.Resampling.LANCZOS
-                    )
-
-                left = (target_width - resized_width) // 2
-                top = (target_height - resized_height) // 2
-                canvas.paste(image, (left, top), image if has_alpha else None)
-
-                suffix = ".png" if has_alpha else ".jpg"
-                normalized_path = TEMP_DIR / f"{uuid.uuid4()}_normalized{suffix}"
-                if has_alpha:
-                    canvas.save(normalized_path, "PNG", optimize=True)
-                else:
-                    canvas.save(normalized_path, "JPEG", quality=90, optimize=True)
-                return str(normalized_path)
-        except UnidentifiedImageError as exc:
-            logger.warning("图片格式无法识别，跳过尺寸处理: %s", exc)
-            return image_path
-        except Exception as exc:
-            logger.warning("图片尺寸处理失败，使用原图: %s", exc)
-            return image_path
+    async def _retry_compressed_image(
+        self,
+        event: AstrMessageEvent,
+        image_path: str,
+        cleanup_paths: List[str],
+    ):
+        return await self.sender.retry_compressed_image(event, image_path, cleanup_paths)
 
     def _schedule_cleanup(self, file_paths: List[str]):
-        async def delayed_cleanup():
-            await asyncio.sleep(60)
-            for file_path in file_paths:
-                try:
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-                except Exception as exc:
-                    logger.error("清理临时文件失败: %s", exc)
+        self.sender.schedule_cleanup(file_paths)
 
-        asyncio.create_task(delayed_cleanup())
+    def _schedule_recall(self, event: AstrMessageEvent, send_result) -> None:
+        self.sender.schedule_recall(event, send_result)
+
+    @staticmethod
+    def _extract_sent_message_id(send_result) -> Optional[str]:
+        return ImageMessageSender.extract_sent_message_id(send_result)
+
+    async def _try_recall_message(
+        self,
+        event: AstrMessageEvent,
+        message_id: str,
+    ) -> bool:
+        return await self.sender.try_recall_message(event, message_id)
+
+    @staticmethod
+    def _get_telegram_chat_id(event: AstrMessageEvent) -> Optional[str]:
+        return ImageMessageSender.get_telegram_chat_id(event)

@@ -1,0 +1,20 @@
+{
+  "enable_image_compression": {
+    "description": "是否开启图片压缩",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后，发送前会用 Pillow 对非动图图片做尺寸兼容处理；关闭后下载原图并直接发送。"
+  },
+  "enable_compress_retry": {
+    "description": "是否开启压缩后重试",
+    "type": "bool",
+    "default": true,
+    "hint": "开启后，如果原图发送失败，会尝试压缩/补边后重新发送一次。"
+  },
+  "recall_after_seconds": {
+    "description": "多少秒之后撤回",
+    "type": "int",
+    "default": 0,
+    "hint": "0 表示不撤回；撤回依赖平台适配器是否能返回已发送消息 ID 并提供删除消息能力。"
+  }
+}
