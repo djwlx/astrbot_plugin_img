@@ -1,18 +1,18 @@
 # astrbot_plugin_img
 
-自定义图片插件 for AstrBot
+自定义图片触发词插件 for AstrBot。
 
-> 简单易用的图片发送插件，支持 URL、API 和本地文件三种图片源。
+> 极简图片发送插件：为触发词绑定一个直接图片 URL，发送触发词即可返回图片。
 
 ## 功能
 
-- **URL 模式**: 为触发词配置直接图片 URL，发送触发词自动返回对应图片
-- **API 模式**: 配置动态图片 API，支持查询参数
-- **本地模式**: 从本地文件夹中随机发送图片
+- 添加图片触发词
+- 删除图片触发词
+- 发送触发词自动返回对应图片
 
 ## 安装
 
-将插件文件放置在您的 AstrBot 插件目录下，并安装依赖：
+将插件文件放置在 AstrBot 插件目录下，并安装依赖：
 
 ```bash
 pip install -r requirements.txt
@@ -20,50 +20,33 @@ pip install -r requirements.txt
 
 ## 使用说明
 
-### URL 模式
+### 添加图片触发词
 
-```
-/添加图片触发 猫 https://example.com/cat.jpg
-/添加图片触发 狗 https://example.com/dog.png
-```
-
-发送 `猫` 或 `狗` 即可自动回复对应图片。
-
-### API 模式
-
-```
-/设置图片API http://localhost:3000/pic
-/添加API触发 随机 type=random
-/测试图片API type=test
+```text
+/添加图片触发词 猫 https://example.com/cat.jpg
 ```
 
-发送 `随机` 即可从 API 获取图片。
+### 删除图片触发词
 
-### 本地模式
-
-```
-/设置图片路径 /path/to/images
-/添加本地图片 壁纸 wallpaper/
-/添加本地图片 头像 avatar.jpg
+```text
+/删除图片触发词 猫
 ```
 
-发送 `壁纸` 会从 wallpaper 文件夹中随机选一张图片发送。
+### 发送图片
 
-### 通用命令
+发送已配置的触发词即可自动回复图片：
 
-| 命令 | 说明 |
-|------|------|
-| `/删除图片触发 [词]` | 删除触发词 |
-| `/图片触发列表` | 查看所有触发词 |
-| `/发送图片 [词]` | 手动发送图片 |
-| `/开启图片插件` | 开启插件 |
-| `/关闭图片插件` | 关闭插件 |
-| `/图片帮助` | 查看帮助 |
+```text
+猫
+```
 
-## 支持的图片格式
+## 注意事项
 
-jpg, jpeg, png, gif, bmp, webp
+- 只支持直接图片 URL。
+- 图片 URL 必须以 `http://` 或 `https://` 开头。
+- 发送时插件会校验目标响应的 `Content-Type` 是否为 `image/*`。
+- 不支持 API 返回 JSON、文本链接、本地图片路径或视频。
 
 ## 开发
 
-基于 AstrBot 插件框架开发，支持异步 HTTP 请求和临时文件管理。
+基于 AstrBot 插件框架开发，使用 `aiohttp` 校验直接图片 URL。
