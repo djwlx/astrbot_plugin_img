@@ -1,10 +1,39 @@
+import asyncio
 import importlib
 import json
+import os
 import sys
 import types
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+
+
+async def collect_async(async_iterable):
+    results = []
+    async for item in async_iterable:
+        results.append(item)
+    return results
+
+
+class PlainEvent:
+    def plain_result(self, text):
+        return text
+
+
+class ChainEvent:
+    def __init__(self, message_str):
+        self.message_str = message_str
+        self.stopped = False
+
+    def plain_result(self, text):
+        return text
+
+    def chain_result(self, chain):
+        return chain
+
+    def stop_event(self):
+        self.stopped = True
 
 
 def install_astrbot_stubs():
@@ -49,6 +78,13 @@ def install_astrbot_stubs():
     class Image:
         def __init__(self, file):
             self.file = file
+            self.path = ""
+
+        @staticmethod
+        def fromFileSystem(path, **_):
+            image = Image(file=f"file:///{os.path.abspath(path)}")
+            image.path = path
+            return image
 
     class ClientSession:
         pass
@@ -124,6 +160,56 @@ class DirectImageConfigTests(unittest.TestCase):
             result = json.loads(config_path.read_text(encoding="utf-8"))
 
         self.assertEqual(result, {"trigger_map": {"cat": "https://example.com/cat.jpg"}})
+
+    def test_safe_photo_canvas_size_handles_telegram_photo_limits(self):
+        normal = self.main.safe_photo_canvas_size(1200, 800)
+        wide = self.main.safe_photo_canvas_size(4000, 100)
+        large = self.main.safe_photo_canvas_size(8000, 4000)
+
+        self.assertEqual(normal, (1200, 800))
+        self.assertLessEqual(max(wide) / min(wide), 20)
+        self.assertLessEqual(sum(large), 9900)
+
+    def test_list_image_triggers_returns_sorted_trigger_words_without_urls(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
+        plugin.trigger_map = {
+            "dog": "https://example.com/dog.jpg",
+            "cat": "https://example.com/cat.jpg",
+        }
+
+        results = asyncio.run(collect_async(plugin.list_image_triggers(PlainEvent())))
+
+        self.assertEqual(results, ["图片触发词列表:\ncat\ndog"])
+
+    def test_list_image_triggers_handles_empty_map(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
+        plugin.trigger_map = {}
+
+        results = asyncio.run(collect_async(plugin.list_image_triggers(PlainEvent())))
+
+        self.assertEqual(results, ["暂无图片触发词"])
+
+    def test_on_message_sends_prepared_local_image_file(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
+        plugin.trigger_map = {"cat": "https://example.com/cat.jpg"}
+        cleanup_paths = []
+
+        async def fake_prepare_image_file(url):
+            self.assertEqual(url, "https://example.com/cat.jpg")
+            return "/tmp/cat.jpg", ["/tmp/cat.jpg"]
+
+        plugin._prepare_image_file = fake_prepare_image_file
+        plugin._schedule_cleanup = cleanup_paths.extend
+        event = ChainEvent("cat")
+
+        results = asyncio.run(collect_async(plugin.on_message(event)))
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(len(results[0]), 1)
+        self.assertTrue(results[0][0].file.startswith("file:///"))
+        self.assertEqual(results[0][0].path, "/tmp/cat.jpg")
+        self.assertTrue(event.stopped)
+        self.assertEqual(cleanup_paths, ["/tmp/cat.jpg"])
 
 
 if __name__ == "__main__":
