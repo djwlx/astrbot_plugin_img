@@ -5,32 +5,62 @@ from typing import Any, Dict, List, Optional, Tuple
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 
-from image_files import (
-    ImageFileService,
-    content_type_to_extension,
-    safe_photo_canvas_size,
-)
-from message_sender import ImageMessageSender
-from settings import (
-    DEFAULT_ENABLE_COMPRESS_RETRY,
-    DEFAULT_ENABLE_IMAGE_COMPRESSION,
-    DEFAULT_RECALL_AFTER_SECONDS,
-    LEGACY_DATA_FILE,
-    LEGACY_TRIGGER_DATA_FILENAME,
-    PLUGIN_NAME,
-    PLUGIN_VERSION,
-    TRIGGER_DATA_FILENAME,
-    read_bool_config,
-    read_non_negative_int_config,
-)
-from trigger_store import (
-    get_plugin_data_dir,
-    is_http_url,
-    load_trigger_map,
-    migrate_legacy_trigger_data,
-    normalize_trigger,
-    save_trigger_map,
-)
+try:
+    from .image_files import (
+        ImageFileService,
+        content_type_to_extension,
+        safe_photo_canvas_size,
+    )
+    from .message_sender import ImageMessageSender
+    from .settings import (
+        DEFAULT_ENABLE_COMPRESS_RETRY,
+        DEFAULT_ENABLE_IMAGE_COMPRESSION,
+        DEFAULT_RECALL_AFTER_SECONDS,
+        LEGACY_DATA_FILE,
+        LEGACY_TRIGGER_DATA_FILENAME,
+        PLUGIN_NAME,
+        PLUGIN_VERSION,
+        TRIGGER_DATA_FILENAME,
+        read_bool_config,
+        read_non_negative_int_config,
+    )
+    from .trigger_store import (
+        get_plugin_data_dir,
+        is_http_url,
+        load_trigger_map,
+        migrate_legacy_trigger_data,
+        normalize_trigger,
+        save_trigger_map,
+    )
+except ImportError:
+    if __package__:
+        raise
+    from image_files import (
+        ImageFileService,
+        content_type_to_extension,
+        safe_photo_canvas_size,
+    )
+    from message_sender import ImageMessageSender
+    from settings import (
+        DEFAULT_ENABLE_COMPRESS_RETRY,
+        DEFAULT_ENABLE_IMAGE_COMPRESSION,
+        DEFAULT_RECALL_AFTER_SECONDS,
+        LEGACY_DATA_FILE,
+        LEGACY_TRIGGER_DATA_FILENAME,
+        PLUGIN_NAME,
+        PLUGIN_VERSION,
+        TRIGGER_DATA_FILENAME,
+        read_bool_config,
+        read_non_negative_int_config,
+    )
+    from trigger_store import (
+        get_plugin_data_dir,
+        is_http_url,
+        load_trigger_map,
+        migrate_legacy_trigger_data,
+        normalize_trigger,
+        save_trigger_map,
+    )
 
 logger = logging.getLogger(__name__)
 

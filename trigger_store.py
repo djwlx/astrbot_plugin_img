@@ -5,7 +5,12 @@ from typing import Dict, List
 
 from astrbot.api.star import StarTools
 
-from settings import PLUGIN_NAME
+try:
+    from .settings import PLUGIN_NAME
+except ImportError:
+    if __package__:
+        raise
+    from settings import PLUGIN_NAME
 
 logger = logging.getLogger(__name__)
 

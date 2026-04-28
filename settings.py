@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any
 
 PLUGIN_NAME = "astrbot_plugin_img"
-PLUGIN_VERSION = "v1.3.0"
+PLUGIN_VERSION = "v1.3.1"
 
 LEGACY_DATA_FILE = Path(__file__).parent / "config.json"
 LEGACY_TRIGGER_DATA_FILENAME = "config.json"

@@ -1,5 +1,6 @@
 import asyncio
 import importlib
+import importlib.util
 import json
 import os
 import sys
@@ -484,6 +485,64 @@ class DirectImageConfigTests(unittest.TestCase):
         changelog = (repo_root / "CHANGELOG.md").read_text(encoding="utf-8")
 
         self.assertIn(f"## {version}", changelog)
+
+    def test_main_imports_when_loaded_as_astrbot_plugin_package(self):
+        repo_root = Path(__file__).resolve().parents[1]
+        package_names = [
+            "data",
+            "data.plugins",
+            "data.plugins.astrbot_plugin_img",
+        ]
+        module_names = package_names + [
+            "main",
+            "settings",
+            "trigger_store",
+            "image_files",
+            "message_sender",
+            "data.plugins.astrbot_plugin_img.main",
+            "data.plugins.astrbot_plugin_img.settings",
+            "data.plugins.astrbot_plugin_img.trigger_store",
+            "data.plugins.astrbot_plugin_img.image_files",
+            "data.plugins.astrbot_plugin_img.message_sender",
+        ]
+        old_modules = {name: sys.modules.get(name) for name in module_names}
+        old_sys_path = list(sys.path)
+
+        try:
+            for name in module_names:
+                sys.modules.pop(name, None)
+
+            data_pkg = types.ModuleType("data")
+            data_pkg.__path__ = []
+            plugins_pkg = types.ModuleType("data.plugins")
+            plugins_pkg.__path__ = []
+            plugin_pkg = types.ModuleType("data.plugins.astrbot_plugin_img")
+            plugin_pkg.__path__ = [str(repo_root)]
+            sys.modules["data"] = data_pkg
+            sys.modules["data.plugins"] = plugins_pkg
+            sys.modules["data.plugins.astrbot_plugin_img"] = plugin_pkg
+            sys.path = [
+                path
+                for path in sys.path
+                if path not in ("", str(repo_root), os.getcwd())
+            ]
+
+            spec = importlib.util.spec_from_file_location(
+                "data.plugins.astrbot_plugin_img.main",
+                repo_root / "main.py",
+            )
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[spec.name] = module
+            spec.loader.exec_module(module)
+
+            self.assertTrue(hasattr(module, "DirectImageTriggerPlugin"))
+        finally:
+            sys.path = old_sys_path
+            for name in module_names:
+                sys.modules.pop(name, None)
+            for name, module in old_modules.items():
+                if module is not None:
+                    sys.modules[name] = module
 
 
 if __name__ == "__main__":
