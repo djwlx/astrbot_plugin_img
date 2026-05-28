@@ -2,42 +2,68 @@
 category: design_standards
 ---
 
-# AI 插件开发最佳实践
+# AI Plugin Development Best Practices
 
-为了确保插件的稳定性、安全性和易用性，建议遵循以下实践方案。
+To ensure plugin stability, security and usability, follow these practices.
 
-### 1. 异常处理
+### 1. Exception Handling
 
-务必捕获可能的异常，并给用户明确的反馈。
+Always catch exceptions and give users clear feedback.
 
 ```python
 try:
-    # 逻辑代码
+    # logic code
 except TimeoutError:
-    yield event.plain_result("⌛ 会话已超时，请重新开始。")
+    yield event.plain_result("⌛ Session timed out, please restart.")
 except Exception as e:
-    logger.error(f"插件执行出错: {e}")
-    yield event.plain_result(f"❌ 发生错误: {e}")
+    logger.error(f"Plugin execution error: {e}")
+    yield event.plain_result(f"❌ Error: {e}")
 finally:
-    event.stop_event() # 已经处理过错误，通常建议停止事件继续传播
+    event.stop_event()
 ```
 
-### 2. 平台差异化
+### 2. Platform Differences
 
-虽然 AstrBot 提供了统一模型，但在调用底层 SDK 功能（如 `call_action`）时，需进行环境检查：
+Although AstrBot provides a unified model, check the environment when calling platform-specific SDK functionality (e.g., `call_action`):
 
 ```python
 if event.get_platform_name() == "aiocqhttp":
-    # 调用 OneBot 特有 API
+    # Call OneBot-specific API
     pass
 ```
 
-### 3. 工具 (Tools) 开发
+### 3. Tools Development
 
-- 推荐使用 `agent-as-tool` 模式。
-- 完善 Docstring，这直接决定了大模型对工具的理解能力。
-- 尽量保持工具功能的单一性。
+- Prefer the `agent-as-tool` pattern.
+- Write thorough docstrings — they directly determine how well the LLM understands the tool.
+- Keep tools single-purpose.
 
-### 4. 资源清理
+### 4. Resource Cleanup
 
-在插件卸载时，应在 `terminate()` 方法中清理定时器、数据库连接或文件句柄。
+Always clean up timers, database connections, file handles and network sessions in `terminate()`. See the full lifecycle template at `templates/plugin/main.py` for a complete implementation example.
+
+### 5. Async I/O & Thread Pool
+
+AstrBot runs on Python's asyncio event loop. Never use synchronous blocking operations inside a plugin.
+
+```python
+# ✅ Good: use async libraries
+import aiohttp
+async with aiohttp.ClientSession() as session:
+    async with session.get("https://api.example.com") as resp:
+        data = await resp.read()
+
+# ❌ Bad: synchronous calls block the entire bot event loop
+# import requests
+# data = requests.get("https://api.example.com").content  # never do this!
+
+# ✅ Fallback: if a sync library is unavoidable, use a thread pool
+import concurrent.futures
+_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+
+async def process_file(self, path: str):
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(_executor, self._sync_read, path)
+```
+
+> **Important**: Any synchronous `time.sleep()` or `requests.get()` call will freeze the entire bot. Always use `asyncio.sleep()` and async HTTP libraries like `aiohttp` or `httpx`.

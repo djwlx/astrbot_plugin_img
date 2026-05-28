@@ -220,6 +220,7 @@ class DirectImageConfigTests(unittest.TestCase):
 
     def test_normalize_trigger_strips_and_lowercases(self):
         self.assertEqual(self.main.normalize_trigger("  Cat  "), "cat")
+        self.assertEqual(self.main.normalize_trigger(None), "")
 
     def test_is_http_url_accepts_only_http_and_https(self):
         self.assertTrue(self.main.is_http_url("https://example.com/cat.jpg"))
@@ -465,6 +466,26 @@ class DirectImageConfigTests(unittest.TestCase):
         self.assertEqual(sent_paths, ["/tmp/original.jpg", "/tmp/compressed.jpg"])
         self.assertTrue(event.stopped)
         self.assertEqual(cleanup_paths, ["/tmp/original.jpg", "/tmp/compressed.jpg"])
+
+    def test_on_message_ignores_non_text_message_str(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
+        plugin.trigger_map = {"cat": "https://example.com/cat.jpg"}
+        event = ChainEvent(None)
+
+        asyncio.run(plugin.on_message(event))
+
+        self.assertFalse(event.stopped)
+        self.assertEqual(event.sent_messages, [])
+
+    def test_supports_onebot_send_when_only_one_method_exists(self):
+        class PartialOneBot:
+            async def send_group_msg(self, **kwargs):
+                return kwargs
+
+        event = ChainEvent("cat")
+        event.bot = PartialOneBot()
+
+        self.assertTrue(self.main.ImageMessageSender._supports_onebot_send(event))
 
     def test_conf_schema_defines_runtime_options(self):
         schema_path = Path(__file__).resolve().parents[1] / "_conf_schema.json"

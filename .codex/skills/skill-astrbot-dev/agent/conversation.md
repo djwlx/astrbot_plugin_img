@@ -50,3 +50,64 @@ contexts, total_pages = await self.context.conversation_manager.get_human_readab
 
 - 所有分支操作必须使用当前会话的 `umo`，不要跨会话复用 `conversation_id`。
 - 更新历史时必须传 OpenAI 风格 `list[dict]` 消息结构。
+
+---
+
+## LLM 请求提示词注入
+
+通过 `@filter.on_llm_request()` 拦截并修改 LLM 请求。
+
+```python
+from astrbot.api.event import filter, AstrMessageEvent
+from astrbot.api.provider import ProviderRequest
+
+@filter.on_llm_request()
+async def on_req(self, event: AstrMessageEvent, req: ProviderRequest):
+    # 修改系统提示词（仅稳定内容）
+    req.system_prompt += "\n\n[全局规则] 回答必须简洁。"
+```
+
+### ProviderRequest 关键属性
+
+| 属性 | 类型 | 用途 |
+|------|------|------|
+| `system_prompt` | `str` | 系统提示词（请求最前） |
+| `prompt` | `str \| None` | 本轮用户输入 |
+| `extra_user_content_parts` | `list[ContentPart]` | 用户消息后的额外内容 |
+| `contexts` | `list[dict]` | OpenAI 格式完整上下文 |
+
+### 1. 系统提示词（system_prompt）
+
+* **`system_prompt += ...`**
+  * 适合追加**稳定、长期有效**的角色设定或全局规则。
+  * **警告**：每轮变化的内容（时间、好感度、记忆片段）会破坏模型服务端提示词缓存，导致成本和首 token 延迟增加 7-20 倍。
+
+### 2. 动态内容（extra_user_content_parts）
+
+* **`req.extra_user_content_parts.append(...)`**
+  * 适合追加每轮变化的**动态上下文**（当前时间、状态面板、短期记忆）。
+  * 追加在用户消息之后，**不影响缓存命中**。
+  * 仅参与本轮请求、不持久化到历史：调用 `.mark_as_temp()`（`>= v4.24.0`）。
+
+```python
+from astrbot.core.agent.message import TextPart
+
+@filter.on_llm_request()
+async def add_dynamic_context(self, event: AstrMessageEvent, req: ProviderRequest):
+    part = TextPart(
+        text=(
+            "<context>\n"
+            f"当前时间：{datetime.now()}\n"
+            "好感度：72\n"
+            "</context>"
+        )
+    )
+    part.mark_as_temp()  # 不写入对话历史
+    req.extra_user_content_parts.append(part)
+```
+
+### 3. 完整上下文替换（contexts）
+
+* **`req.contexts = [...]`**
+  * 直接替换 OpenAI 格式的消息历史。
+  * 风险较高，需谨慎维护消息结构完整性。

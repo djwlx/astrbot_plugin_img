@@ -1,7 +1,7 @@
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from astrbot.api.star import StarTools
 
@@ -15,7 +15,9 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-def normalize_trigger(trigger: str) -> str:
+def normalize_trigger(trigger: Any) -> str:
+    if not isinstance(trigger, str):
+        return ""
     return trigger.strip().lower()
 
 

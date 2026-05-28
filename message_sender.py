@@ -209,8 +209,10 @@ class ImageMessageSender:
         bot = getattr(event, "bot", None)
         return bool(
             bot
-            and callable(getattr(bot, "send_group_msg", None))
-            and callable(getattr(bot, "send_private_msg", None))
+            and (
+                callable(getattr(bot, "send_group_msg", None))
+                or callable(getattr(bot, "send_private_msg", None))
+            )
         )
 
     @staticmethod

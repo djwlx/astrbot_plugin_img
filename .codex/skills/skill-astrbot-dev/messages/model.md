@@ -16,7 +16,8 @@ class AstrBotMessage:
     self_id: str          # 机器人 ID
     session_id: str       # 会话 ID，决定了上下文隔离
     message_id: str       # 消息 ID
-    group_id: str         # 群组 ID（如果是私聊则为空）
+    group: Group | None   # 群组信息（私聊为 None）
+    # group_id 是向后兼容的 @property，私聊返回空字符串
     sender: MessageMember # 发送者信息（含 user_id 和 nickname）
     message: List[BaseMessageComponent] # 消息链（组件列表）
     message_str: str      # 纯文本汇总内容

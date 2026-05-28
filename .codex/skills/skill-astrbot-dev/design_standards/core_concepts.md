@@ -4,7 +4,6 @@
 
 ### 1. 装饰器 (Decorators)
 
-- `@register(id, author, description, version, repo_url)`: 注册插件。
 - `@filter.command(name, alias, priority)`: 注册指令。支持带参函数。
 - `@filter.command_group(name)`: 注册指令组。
 - `@filter.event_message_type(type)`: 过滤消息类型 (`ALL`, `PRIVATE_MESSAGE`, `GROUP_MESSAGE`)。
@@ -49,7 +48,7 @@ prov_id = await self.context.get_current_chat_provider_id(umo)
 
 - `await context.get_current_chat_provider_id(umo) -> str`: 获取当前会话使用的 chat provider ID。
 - `await context.llm_generate(chat_provider_id, prompt, contexts=None, system_prompt=None, tools=None) -> LLMResponse`: 简化的 LLM 调用。
-- `await context.tool_loop_agent(event, chat_provider_id, prompt, tools, system_prompt=None, max_steps=30, tool_call_timeout=60) -> LLMResponse`: 工具循环 Agent。
+- `await context.tool_loop_agent(event, chat_provider_id, prompt, tools, system_prompt=None, max_steps=30, tool_call_timeout=120) -> LLMResponse`: 工具循环 Agent。
 
 **MessageChain (消息链构建器)**
 
@@ -62,21 +61,21 @@ prov_id = await self.context.get_current_chat_provider_id(umo)
 - `await self.get_kv_data(key, default)`: 获取插件隔离的 KV 数据。
 - `await self.put_kv_data(key, value)`: 存储插件隔离的 KV 数据。
 - `await self.delete_kv_data(key)`: 删除 KV 数据。
-- `await self.html_render(html_text=None, url=None, data=None, options=None)`: 将 HTML 字符串或网页渲染为图片。基于 Playwright。
+- `await self.html_render(tmpl: str, data: dict, return_url=True, options=None) -> str`: 渲染 Jinja2 HTML 模板为图片路径或 URL。基于 Playwright。
 - `text_to_image(text)`: 将文字转为图片。
 
 ### 5. 系统钩子 (Hooks)
 
 Hooks 分为两层，不建议在"概念清单"里重复列举具体 hook 名单（容易过时）：
 
-- 插件事件钩子（`@filter.on_*`）：见 `docs/plugin_config/hooks.md`
-- Agent 运行钩子（`BaseAgentRunHooks`）：见 `docs/agent/agent-related-hooks.md`
+- 插件事件钩子（`@filter.on_*`）：见 `skill-astrbot-dev/plugin_config/hooks.md`
+- Agent 运行钩子（`BaseAgentRunHooks`）：见 `skill-astrbot-dev/agent/agent-related-hooks.md`
 
 ### 6. Agent 智能体
 
-- Agent 相关能力（tools / providers / persona / sandbox / cron / subagents）：见 `docs/agent/`
+- Agent 相关能力（tools / providers / persona / sandbox / cron / subagents）：见 `skill-astrbot-dev/agent/`
 - `context.tool_loop_agent(...)`: 调用工具循环 Agent（可结合子智能体 handoff）
-- v4.7.0+ Agent Runner 架构：见 `docs/agent/agent-runner.md`
+- v4.7.0+ Agent Runner 架构：见 `skill-astrbot-dev/agent/agent-runner.md`
 
 ### 7. Tool 定义 (v4.5.7+ 推荐)
 
@@ -85,7 +84,7 @@ Hooks 分为两层，不建议在"概念清单"里重复列举具体 hook 名单
 ```python
 from pydantic import Field
 from pydantic.dataclasses import dataclass
-from astrbot.core.agent.tool import FunctionTool
+from astrbot.api import FunctionTool
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.astr_agent_context import AstrAgentContext
 

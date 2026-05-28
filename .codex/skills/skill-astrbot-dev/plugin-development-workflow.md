@@ -1,4 +1,4 @@
-﻿# Plugin Development Workflow
+# Plugin Development Workflow
 
 ## 1. Scaffold or Inspect
 
@@ -62,7 +62,7 @@ Rules:
 Common filters:
 - `@filter.command("name")` for slash-style commands.
 - `@filter.command_group("group")` then `@group.command("sub")` for grouped commands.
-- `@filter.on_full_match(...)`, `@filter.on_prefix(...)`, `@filter.on_keyword(...)`, `@filter.on_regex(...)` for text triggers.
+- `@filter.regex(pattern)` for regex text triggers.
 - `@filter.event_message_type(...)` to restrict private/group/all message types.
 - `@filter.permission_type(...)` for permission-gated non-tool handlers.
 

@@ -18,7 +18,6 @@ await cron_mgr.add_basic_job(
     payload={"key": "value"},
     persistent=False,
     description="任务描述",
-    handler_params={"extra": "data"},
     enabled=True,
 )
 ```
@@ -29,7 +28,6 @@ await cron_mgr.add_basic_job(
 - `payload: dict`: 传给 handler 的上下文数据
 - `persistent: bool`: 是否持久化（重启后保留，依赖 DB）
 - `description: str`: 任务描述（v4.22.2 新增）
-- `handler_params: dict`: 额外参数，合并到 payload（v4.22.2 新增）
 - `enabled: bool`: 是否启用（v4.22.2 新增）
 
 ## 注册 AI 唤醒（Active Agent Job）
