@@ -35,7 +35,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 PLUGIN_NAME = "astrbot_plugin_img"
-PLUGIN_VERSION = "v2.1.2"
+PLUGIN_VERSION = "v2.1.3"
 TRIGGER_DATA_FILENAME = "triggers.json"
 MAX_IMAGE_BYTES = 4_000_000
 

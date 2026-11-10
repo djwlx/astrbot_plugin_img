@@ -94,6 +94,6 @@ pip install -r requirements.txt
 
 基于 AstrBot 插件框架开发，使用 `aiohttp` 下载直接图片 URL，再通过 AstrBot 的 `Image` 消息组件发送本地图片。
 
-使用来自 [PyPI 的 Pillow 12.3.0](https://pypi.org/project/pillow/12.3.0/) 编码 WebP，压缩在后台线程中执行。Pillow 依赖已固定版本，运行环境需要 Python 3.10 或以上。
+使用 AstrBot 核心提供的 [Pillow](https://pypi.org/project/pillow/) 编码 WebP，压缩在后台线程中执行。插件不重复指定 Pillow 版本，以遵循 AstrBot 的核心依赖版本保护；已使用 Pillow 13.0.0 验证压缩和清理流程。
 
 运行代码分为两个文件：`main.py` 负责命令、触发匹配、图片下载与发送；`trigger_store.py` 负责触发词校验与数据读写。
