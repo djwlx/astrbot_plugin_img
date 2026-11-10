@@ -1,4 +1,5 @@
 import asyncio
+import errno
 import importlib
 import importlib.util
 import io
@@ -464,8 +465,80 @@ class DirectImageConfigTests(unittest.TestCase):
 
             self.assertEqual(len(event.sent_messages), 1)
             self.assertIn("图片压缩失败", event.sent_messages[0].chain[0].text)
+            self.assertIn("格式无法识别或文件已损坏", event.sent_messages[0].chain[0].text)
             self.assertTrue(source_path.exists())
         self.assertTrue(event.stopped)
+
+    def test_compression_reports_actual_dimensions_and_frame_limits(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
+        with TemporaryDirectory() as temp_dir:
+            plugin.temp_dir = Path(temp_dir)
+            source_path = plugin.temp_dir / "original.gif"
+            frames = [PILImage.new("RGB", (32, 32), color) for color in ("red", "blue")]
+            try:
+                frames[0].save(
+                    source_path, save_all=True, append_images=frames[1:], duration=100
+                )
+            finally:
+                for frame in frames:
+                    frame.close()
+
+            for limit, value, expected in (
+                ("MAX_IMAGE_PIXELS", 100, "图片尺寸 32×32"),
+                ("MAX_ANIMATION_FRAMES", 1, "动图有 2 帧"),
+                ("MAX_ANIMATION_PIXELS", 1024, "累计像素"),
+            ):
+                with (
+                    self.subTest(limit=limit),
+                    patch.object(self.main, "MAX_IMAGE_BYTES", 1),
+                    patch.object(self.main, limit, value),
+                    self.assertRaisesRegex(self.main.ImageCompressionError, expected),
+                ):
+                    plugin._compress_image_to_webp(str(source_path))
+
+    def test_missing_webp_encoder_has_specific_error(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
+        with TemporaryDirectory() as temp_dir:
+            source_path = Path(temp_dir) / "original.png"
+            with PILImage.new("RGB", (8, 8), "red") as image:
+                image.save(source_path)
+            with (
+                patch.object(self.main, "MAX_IMAGE_BYTES", 1),
+                patch.object(self.main.features, "check", return_value=False),
+                self.assertRaisesRegex(self.main.ImageCompressionError, "缺少 WebP"),
+            ):
+                plugin._compress_image_to_webp(str(source_path))
+
+    def test_processing_errors_report_reason_and_preserve_source(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
+        plugin.trigger_map = {"cat": "https://example.com/cat.png"}
+        with TemporaryDirectory() as temp_dir:
+            plugin.temp_dir = Path(temp_dir)
+            source_path = plugin.temp_dir / "original.png"
+            source_path.write_bytes(b"keep-original")
+
+            async def fake_download(_url):
+                return str(source_path)
+
+            plugin._download_direct_image = fake_download
+            for error, expected in (
+                (MemoryError(), "内存不足"),
+                (PermissionError(), "没有读写权限"),
+                (OSError(errno.ENOSPC, "no space left"), "磁盘空间不足"),
+            ):
+                event = ChainEvent("cat")
+                with (
+                    self.subTest(error=type(error).__name__),
+                    patch.object(plugin, "_compress_image_to_webp", side_effect=error),
+                    self.assertLogs(self.main.logger, level="WARNING") as logs,
+                ):
+                    asyncio.run(plugin.on_message(event))
+
+                self.assertEqual(len(event.sent_messages), 1)
+                self.assertIn(expected, event.sent_messages[0].chain[0].text)
+                self.assertIn(expected, logs.output[0])
+                self.assertTrue(event.stopped)
+                self.assertEqual(source_path.read_bytes(), b"keep-original")
 
     def test_failed_send_preserves_original_and_compressed_image(self):
         plugin = self.main.DirectImageTriggerPlugin(object())

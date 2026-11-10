@@ -1,4 +1,5 @@
 import asyncio
+import errno
 import io
 import logging
 import uuid
@@ -7,7 +8,7 @@ from typing import Dict, Optional
 
 import aiohttp
 from PIL import Image as PILImage
-from PIL import ImageOps
+from PIL import ImageOps, UnidentifiedImageError, features
 
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.message_components import Image, Plain
@@ -35,9 +36,12 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 PLUGIN_NAME = "astrbot_plugin_img"
-PLUGIN_VERSION = "v2.1.3"
+PLUGIN_VERSION = "v2.1.4"
 TRIGGER_DATA_FILENAME = "triggers.json"
 MAX_IMAGE_BYTES = 4_000_000
+MAX_IMAGE_PIXELS = 40_000_000
+MAX_ANIMATION_FRAMES = 300
+MAX_ANIMATION_PIXELS = 80_000_000
 
 CONTENT_TYPE_EXTENSIONS = {
     "image/jpeg": ".jpg",
@@ -52,6 +56,10 @@ CONTENT_TYPE_EXTENSIONS = {
 def content_type_to_extension(content_type: str) -> str:
     media_type = content_type.split(";", 1)[0].strip().lower()
     return CONTENT_TYPE_EXTENSIONS.get(media_type, ".jpg")
+
+
+class ImageCompressionError(ValueError):
+    """只携带可安全展示给用户的压缩失败原因。"""
 
 
 @register(PLUGIN_NAME, "djwlx", "自定义图片触发词插件，仅支持直接图片URL", PLUGIN_VERSION)
@@ -124,8 +132,24 @@ class DirectImageTriggerPlugin(Star):
                     self._compress_image_to_webp, image_path
                 )
         except Exception as exc:
-            logger.warning("图片压缩失败: %s", type(exc).__name__)
-            await self._safe_send_plain(event, "图片压缩失败，无法将文件压缩到 4 MB 以内")
+            if isinstance(exc, ImageCompressionError):
+                reason = str(exc)
+            elif isinstance(exc, UnidentifiedImageError):
+                reason = "图片格式无法识别或文件已损坏"
+            elif isinstance(exc, PILImage.DecompressionBombError):
+                reason = "图片像素过多，已停止解码"
+            elif isinstance(exc, MemoryError):
+                reason = "压缩时内存不足"
+            elif isinstance(exc, FileNotFoundError):
+                reason = "下载的图片文件不存在"
+            elif isinstance(exc, PermissionError):
+                reason = "临时图片目录没有读写权限"
+            elif isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
+                reason = "磁盘空间不足，无法保存压缩图片"
+            else:
+                reason = f"图片解码、编码或文件读写异常（{type(exc).__name__}）"
+            logger.warning("图片压缩失败: %s [%s]", reason, type(exc).__name__)
+            await self._safe_send_plain(event, f"图片压缩失败：{reason}")
             event.stop_event()
             return
 
@@ -167,6 +191,8 @@ class DirectImageTriggerPlugin(Star):
     def _compress_image_to_webp(self, image_path: str) -> str:
         if Path(image_path).stat().st_size <= MAX_IMAGE_BYTES:
             return image_path
+        if not features.check("webp"):
+            raise ImageCompressionError("当前 Pillow 缺少 WebP 编码支持")
 
         frames = []
         durations = []
@@ -176,12 +202,18 @@ class DirectImageTriggerPlugin(Star):
                 frame_count = (
                     image.n_frames if getattr(image, "is_animated", False) else 1
                 )
-                if (
-                    width * height > 40_000_000
-                    or frame_count > 300
-                    or width * height * frame_count > 80_000_000
-                ):
-                    raise ValueError("图片像素或帧数超出处理限制")
+                if width * height > MAX_IMAGE_PIXELS:
+                    raise ImageCompressionError(
+                        f"图片尺寸 {width}×{height}，超过 4000 万像素处理上限"
+                    )
+                if frame_count > MAX_ANIMATION_FRAMES:
+                    raise ImageCompressionError(
+                        f"动图有 {frame_count} 帧，超过 {MAX_ANIMATION_FRAMES} 帧处理上限"
+                    )
+                if width * height * frame_count > MAX_ANIMATION_PIXELS:
+                    raise ImageCompressionError(
+                        f"动图尺寸 {width}×{height}、共 {frame_count} 帧，累计像素超过 8000 万处理上限"
+                    )
                 loop = image.info.get("loop", 0)
                 for index in range(frame_count):
                     image.seek(index)
@@ -212,7 +244,7 @@ class DirectImageTriggerPlugin(Star):
 
                 width, height = frames[0].size
                 if (width, height) == (1, 1):
-                    raise ValueError("压缩后的文件仍超过 4 MB")
+                    raise ImageCompressionError("缩小至最小尺寸后文件仍超过 4 MB")
                 size = (max(1, int(width * 0.75)), max(1, int(height * 0.75)))
                 for index, frame in enumerate(frames):
                     frames[index] = frame.resize(size, PILImage.Resampling.LANCZOS)
