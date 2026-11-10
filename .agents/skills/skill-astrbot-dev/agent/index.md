@@ -10,15 +10,15 @@ category: agent
 
 ## 你大概率会从这里开始
 
-- 需要让模型调用工具：`skill-astrbot-dev/agent/registe tools.md`
-- 需要选模型/Embedding/STT/TTS：`skill-astrbot-dev/agent/providers.md`
-- 需要控制上下文与压缩：`skill-astrbot-dev/agent/context-compression.md`
-- 需要 Hook（事件钩子/Agent 钩子）：`skill-astrbot-dev/agent/agent-related-hooks.md`
-- 需要子智能体：`skill-astrbot-dev/agent/subagents.md`
-- 需要代码方式注册子智能体：`skill-astrbot-dev/agent/agent-registration.md`
-- 需要沙盒（computer use）：`skill-astrbot-dev/agent/sandbox.md`
-- 需要定时任务（主动能力）：`skill-astrbot-dev/agent/cron.md`
-- **v4.7.0+ Agent Runner 架构（Dify/Coze/DeerFlow）**：`skill-astrbot-dev/agent/agent-runner.md`
+- 需要让模型调用工具：`agent/register tools.md`
+- 需要选模型/Embedding/STT/TTS：`agent/providers.md`
+- 需要控制上下文与压缩：`agent/context-compression.md`
+- 需要 Hook（事件钩子/Agent 钩子）：`agent/agent-related-hooks.md`
+- 需要子智能体：`agent/subagents.md`
+- 需要代码方式注册子智能体：`agent/agent-registration.md`
+- 需要沙盒（computer use）：`agent/sandbox.md`
+- 需要定时任务（主动能力）：`agent/cron.md`
+- **v4.7.0+ Agent Runner 架构（Dify/Coze/DeerFlow）**：`agent/agent-runner.md`
 
 ## 最短示例：工具循环 Agent
 

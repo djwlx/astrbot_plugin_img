@@ -1,0 +1,2966 @@
+diff --git a/.codex/skills/skill-astrbot-dev/.gitignore b/.agents/skills/skill-astrbot-dev/.gitignore
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/.gitignore
+rename to .agents/skills/skill-astrbot-dev/.gitignore
+diff --git a/.agents/skills/skill-astrbot-dev/Guidelines_Testing.md b/.agents/skills/skill-astrbot-dev/Guidelines_Testing.md
+new file mode 100644
+index 0000000..0d0b9c7
+--- /dev/null
++++ b/.agents/skills/skill-astrbot-dev/Guidelines_Testing.md
+@@ -0,0 +1,6 @@
++用 OpenAPI 调试 AstrBot 插件有三个核心技巧：
++
++1. 用 /api/v1/plugin/reload 热重载，能立刻生效新代码。配合 /api/v1/config/read/logs 确认状态。
++2. 用 /api/v1/chat 直接注入命令（如 550cnews_test_md file），触发插件命令而不是自由 chat。记得用你的前缀（如 550c）。
++3. 结果/图片/日志都可直接 GET 查看，如 /data/attachments/ 下图，/api/v1/logs 查 Traceback，能精确定位问题。
++二：对于plugin page的开发，请使用/api/v1/plugins/pages 进行检索插件页面的列表、HTML 入口与静态资源，并作为代理转发对插件扩展路由的各种 HTTP 请求
+diff --git a/.codex/skills/skill-astrbot-dev/SKILL.md b/.agents/skills/skill-astrbot-dev/SKILL.md
+similarity index 70%
+rename from .codex/skills/skill-astrbot-dev/SKILL.md
+rename to .agents/skills/skill-astrbot-dev/SKILL.md
+index 5458afe..16c08da 100644
+--- a/.codex/skills/skill-astrbot-dev/SKILL.md
++++ b/.agents/skills/skill-astrbot-dev/SKILL.md
+@@ -19,7 +19,6 @@ metadata:
+   compatibility: astrbot >=4.16
+   license: MIT
+ ---
+-
+ # skill-astrbot-dev
+ 
+ This skill provides the authoritative reference for AstrBot plugin and core development.
+@@ -33,22 +32,24 @@ Use this skill when you ask for help with:
+ - AstrBot plugin structure, decorators/hooks, lifecycle, schema, sessions
+ - Message model/event flow and message-chain conversion
+ - Platform adapter interface and message conversion patterns
+-- Agent topics (tools/providers/personas/subagents/sandbox/cron/context compression)
++  - Agent topics (tools/providers/personas/subagents/sandbox/cron/context compression)
++  - Context management (conversation branches, history operations, context injection, compression strategies)
+ 
+ ## Mandatory workflow (use this every time)
+ 
+ 1. Start from a single entrypoint (avoid broad loading):
+-   - Site index: `skill-astrbot-dev/index.md`
+-   - Core concepts: `skill-astrbot-dev/design_standards/core_concepts.md`
++   - Workflow overview: `plugin-development-workflow.md`
++   - Core concepts: `design_standards/core_concepts.md`
+ 2. Pick one topic folder and stay focused:
+-   - Agent system: `skill-astrbot-dev/agent/`
+-   - Plugin config: `skill-astrbot-dev/plugin_config/`
+-   - Messages: `skill-astrbot-dev/messages/`
+-   - Platform adapters: `skill-astrbot-dev/platform_adapters/`
+-3. For Agent Runner (v4.7.0+): `skill-astrbot-dev/agent/agent-runner.md`
+-4. If the user targets a specific AstrBot version, cross-check:
+-   - `skill-astrbot-dev/snapshots/<version>/`
+-5. If docs and code disagree, treat code as truth:
++   - Agent system: `agent/` (start with `agent/index.md`)
++   - Plugin config: `plugin_config/`
++   - Messages: `messages/`
++   - Platform adapters: `platform_adapters/`
++3. For Agent Runner (v4.7.0+): `agent/agent-runner.md`
++4. For context management (conversation, history, compression): `agent/context-management.md`
++5. If the user targets a specific AstrBot version, cross-check the repo tag:
++   - `git -C <astrbot-repo> describe --tags`
++6. If docs and code disagree, treat code as truth:
+    - Core code lives under `astrbotcore/astrbot/core/` (read only the needed files)
+ 
+ ## STRONGLY ADVISED: use AstrBot SDK while writing plugins
+@@ -96,18 +97,19 @@ astrbot_version: ">=4.16,<5" #声明插件要求的 AstrBot 版本范围。
+ - Prefer small, testable functions over large monolithic handler bodies.
+ - Keep README and metadata consistent with actual plugin behavior and version.
+   -If you are writing AstrBot core code instead of plugins, you must submit a PR to https://github.com/AstrBotDevs/AstrBot-docs if the changes require doc updates (for instance: new hooks, new APIs, new features, platform adapter changes, and so on). If you don't see the docs repo, please remind the user to clone the docs-repo and add it to the workspace.
+-Ensure that a `requirements.txt` file is created in the plugin directory and populated with the necessary dependencies.
+-It's best to keep the plugin size under 32MB.
+-For large resources like high-resolution images, it is best to use a CDN instead of hardcoring.
+-It's better to use new hooks instead of old ones.
++  Ensure that a `requirements.txt` file is created in the plugin directory and populated with the necessary dependencies.
++  It's best to keep the plugin size under 32MB.
++  For large resources like high-resolution images, it is best to use a CDN instead of hardcoring.
++  It's better to use new hooks instead of old ones.
++
+ ### 
+ 
+ ## Hooks: avoid missing / outdated references
+ 
+ There are two different "hook" layers you must not mix up:
+ 
+-- Plugin event hooks (decorators): `skill-astrbot-dev/plugin_config/hooks.md`
+-- Agent runner hooks (`BaseAgentRunHooks`): `skill-astrbot-dev/agent/agent-related-hooks.md`
++- Plugin event hooks (decorators): `agent/agent-related-hooks.md` + `design_standards/event_flow.md`
++- Agent runner hooks (`BaseAgentRunHooks`): `agent/agent-related-hooks.md`
+ 
+ If you need a complete hook inventory (because context may be truncated), generate it locally:
+ 
+@@ -127,10 +129,11 @@ do not reference `.tmp` paths as public documentation URLs.
+ - Main agent build (sandbox/cron/tools): `astrbotcore/astrbot/core/astr_main_agent.py`
+ - Skills system (AstrBot runtime skills): `astrbotcore/astrbot/core/skills/skill_manager.py`
+ - Subagents config loading: `astrbotcore/astrbot/core/subagent_orchestrator.py`
++- Pipeline stages: `astrbotcore/astrbot/core/pipeline/` (see `stage_order.py`)
+ 
+ ## v4.5.7+ New Tool Definition Pattern
+ 
+-推荐使用 dataclass 模式定义 Tool（见 `skill-astrbot-dev/design_standards/core_concepts.md` 第7节）：
++推荐使用 dataclass 模式定义 Tool（见 `design_standards/core_concepts.md` 第7节）：
+ 
+ ```python
+ from pydantic.dataclasses import dataclass
+@@ -149,3 +152,13 @@ class MyTool(FunctionTool):
+ 注册：`self.context.add_llm_tools(MyTool())`
+ 
+ 装饰器方式仍然支持，但推荐新项目使用 dataclass 模式。
++
++AstrBot supports project debugging using OpenAPI. Please ask the user for their API key and the URL/address of their AstrBot instance. Additionally, retrieve the full OpenAPI documentation at `[https://docs.astrbot.app/scalar.html](https://docs.astrbot.app/scalar.html)`. Further requirements regarding autonomous debugging can be found in `Guidelines_Testing.md`
++
++
++AstrBot offers a simple KV storage interface for plugins—ideal for saving configurations, lightweight states, or user data.Consider using it where appropriate.
++Call these directly inside your plugin class (inheriting from `Star`):
++
++* `await self.put_kv_data(key: str, value: Any)`: Store data
++* `await self.get_kv_data(key: str, default: Any = None) -> Any`: Get data
++* `await self.delete_kv_data(key: str)`: Delete data
+diff --git a/.codex/skills/skill-astrbot-dev/Storage & Utils/file_storage.md b/.agents/skills/skill-astrbot-dev/Storage & Utils/file_storage.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/Storage & Utils/file_storage.md
+rename to .agents/skills/skill-astrbot-dev/Storage & Utils/file_storage.md
+diff --git a/.codex/skills/skill-astrbot-dev/Storage & Utils/plugin-i18n.md b/.agents/skills/skill-astrbot-dev/Storage & Utils/plugin-i18n.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/Storage & Utils/plugin-i18n.md
+rename to .agents/skills/skill-astrbot-dev/Storage & Utils/plugin-i18n.md
+diff --git a/.codex/skills/skill-astrbot-dev/Storage & Utils/text_to_image.md b/.agents/skills/skill-astrbot-dev/Storage & Utils/text_to_image.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/Storage & Utils/text_to_image.md
+rename to .agents/skills/skill-astrbot-dev/Storage & Utils/text_to_image.md
+diff --git a/.codex/skills/skill-astrbot-dev/agent/Invoke-llm.md b/.agents/skills/skill-astrbot-dev/agent/Invoke-llm.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/agent/Invoke-llm.md
+rename to .agents/skills/skill-astrbot-dev/agent/Invoke-llm.md
+diff --git a/.codex/skills/skill-astrbot-dev/agent/agent-related-hooks.md b/.agents/skills/skill-astrbot-dev/agent/agent-related-hooks.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/agent/agent-related-hooks.md
+rename to .agents/skills/skill-astrbot-dev/agent/agent-related-hooks.md
+diff --git a/.codex/skills/skill-astrbot-dev/agent/agent-runner.md b/.agents/skills/skill-astrbot-dev/agent/agent-runner.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/agent/agent-runner.md
+rename to .agents/skills/skill-astrbot-dev/agent/agent-runner.md
+diff --git a/.agents/skills/skill-astrbot-dev/agent/context-management.md b/.agents/skills/skill-astrbot-dev/agent/context-management.md
+new file mode 100644
+index 0000000..c2b662c
+--- /dev/null
++++ b/.agents/skills/skill-astrbot-dev/agent/context-management.md
+@@ -0,0 +1,253 @@
++# 上下文管理（Context Management）
++
++AstrBot 的上下文管理涵盖对话分支维护、运行时上下文压缩、请求注入和持久化历史操作。以下按插件开发者的使用链路组织：读取/创建对话 → 操作历史 → 注入上下文 → 压缩策略 → 已知限制。
++
++---
++
++## 1. 会话与对话分支
++
++插件通过 `self.context.conversation_manager` 管理会话分支，会话标识统一使用 `event.unified_msg_origin`（`umo`）。
++
++### ConversationManager 可用方法
++
++- `new_conversation(unified_msg_origin, platform_id=None, content=None, title=None, persona_id=None) -> str`
++  新建对话并将当前会话切换到该分支，返回 `conversation_id`。
++
++- `switch_conversation(unified_msg_origin, conversation_id)`
++  切换当前会话到指定的对话分支。
++
++- `delete_conversation(unified_msg_origin, conversation_id=None)`
++  删除指定对话分支；不传 `conversation_id` 时删除当前分支。
++
++- `get_curr_conversation_id(unified_msg_origin) -> str | None`
++  获取当前分支 ID。
++
++- `get_conversation(unified_msg_origin, conversation_id, create_if_not_exists=False) -> Conversation | None`
++  读取对话对象。
++
++- `get_conversations(unified_msg_origin=None, platform_id=None) -> list[Conversation]`
++  列出分支。
++
++- `update_conversation(unified_msg_origin, conversation_id=None, history=None, title=None, persona_id=None, token_usage=None)`
++  覆盖式更新历史、标题、人格等。`history` 须为 OpenAI 格式 `list[dict]`。
++
++- `add_message_pair(cid, user_message, assistant_message)`
++  向指定分支追加一组 user/assistant 消息。
++
++- `get_human_readable_context(unified_msg_origin, conversation_id, page=1, page_size=10) -> tuple[list[str], int]`
++  获取分页后的可读上下文字符串。
++
++### Conversation 数据类字段
++
++```python
++@dataclass
++class Conversation:
++    platform_id: str        # 平台标识
++    user_id: str            # 用户/会话标识
++    cid: str                # 对话分支 ID（UUID）
++    history: str            # 对话历史（JSON 字符串，OpenAI 格式）
++    title: str | None       # 对话标题
++    persona_id: str | None  # 关联人格 ID
++    created_at: int         # 创建时间戳
++    updated_at: int         # 更新时间戳
++```
++
++### 最小示例
++
++```python
++conv_mgr = self.context.conversation_manager
++umo = event.unified_msg_origin
++
++# 获取当前分支
++cid = await conv_mgr.get_curr_conversation_id(umo)
++
++# 新建分支
++new_cid = await conv_mgr.new_conversation(umo, title="新分支")
++
++# 读取历史
++conv = await conv_mgr.get_conversation(umo, cid)
++import json
++history = json.loads(conv.history)  # list[dict]
++
++# 追加消息对
++from astrbot.core.agent.message import UserMessageSegment, AssistantMessageSegment, TextPart
++user_msg = UserMessageSegment(content=[TextPart(text="你好")])
++assistant_msg = AssistantMessageSegment(content=[TextPart(text="你好")])
++await conv_mgr.add_message_pair(cid=cid, user_message=user_msg, assistant_message=assistant_msg)
++```
++
++---
++
++## 2. 上下文压缩策略
++
++AstrBot 在请求 LLM 前自动执行上下文压缩，策略由 `context_limit_reached_strategy` 决定。
++
++### 压缩策略类型
++
++| 策略 | 说明 |
++|------|------|
++| `truncate_by_turns` | 按对话轮次截断，直接丢弃最老的 `truncate_turns` 轮 |
++| `llm_compress` | 使用 LLM 生成摘要，保留最近 `llm_compress_keep_recent` 条消息 |
++
++### 配置项（`context_limit_reached_strategy` 相关）
++
++- `max_context_length`：最大保留轮数，`-1` 不限制（**默认 50**）
++- `dequeue_context_length`：触发截断时一次丢弃的轮数（**默认 10**）
++- `llm_compress_instruction`：LLM 压缩时的摘要指令
++- `llm_compress_keep_recent`：LLM 压缩时保留最近多少条不摘要（**默认 10**）
++- `llm_compress_provider_id`：指定压缩用的 Provider ID，为空时自动回退到当前聊天 Provider
++
++### PR #8226 影响
++
++- **请求时上下文保护**：压缩不再修改持久化的 `run_context.messages`，仅在副本上处理。
++- **默认值变更**：
++  - `max_context_length`: `-1` → `50`
++  - `dequeue_context_length`: `1` → `10`
++  - `llm_compress_keep_recent`: `6` → `10`
++- **对插件的影响**：
++  - 压缩行为变化可能导致插件获取到的历史与预期不同。
++  - 如果插件依赖历史内容做后续处理，建议显式传入压缩参数。
++
++### 在 `tool_loop_agent` 中使用
++
++```python
++await self.context.tool_loop_agent(
++    event=event,
++    chat_provider_id=prov_id,
++    prompt="...",
++    enforce_max_turns=20,       # 最多保留 20 轮
++    truncate_turns=2,           # 截断时丢弃 2 轮
++    llm_compress_instruction="保留任务结论",
++    llm_compress_keep_recent=8,
++    llm_compress_provider=compress_prov,
++)
++```
++
++### 获取当前 Provider ID
++
++```python
++chat_provider_id = await self.context.get_current_chat_provider_id(event.unified_msg_origin)
++compress_prov = self.context.get_provider_by_id("openai/gpt-4o-mini")
++```
++
++---
++
++## 3. 请求时上下文注入
++
++插件可通过 `@filter.on_llm_request()` 拦截并修改 LLM 请求。
++
++### ProviderRequest 关键属性
++
++| 属性 | 类型 | 用途 |
++|------|------|------|
++| `system_prompt` | `str` | 系统提示词（请求最前） |
++| `prompt` | `str \| None` | 本轮用户输入 |
++| `extra_user_content_parts` | `list[ContentPart]` | 用户消息后的额外内容 |
++| `contexts` | `list[dict]` | OpenAI 格式完整上下文 |
++
++### 注入方式对比
++
++#### 3.1 系统提示词（`system_prompt`）
++- **适用**：稳定、长期有效的角色设定或全局规则
++- **风险**：每轮变化的内容会破坏模型服务端提示词缓存，导致成本和首 token 延迟增加 7-20 倍
++
++#### 3.2 动态内容（`extra_user_content_parts`）
++- **适用**：每轮变化的动态上下文（时间、状态、短期记忆）
++- **优势**：不影响缓存命中，追加在用户消息之后
++- **临时内容**：调用 `.mark_as_temp()` 仅参与本轮请求、不持久化到历史
++
++```python
++from astrbot.core.agent.message import TextPart
++
++@filter.on_llm_request()
++async def add_dynamic_context(self, event: AstrMessageEvent, req: ProviderRequest):
++    part = TextPart(text=f"<context>当前时间：{datetime.now()}</context>")
++    part.mark_as_temp()  # 不写入对话历史
++    req.extra_user_content_parts.append(part)
++```
++
++#### 3.3 完整上下文替换（`contexts`）
++- **适用**：直接替换 OpenAI 格式的消息历史
++- **风险**：较高，需谨慎维护消息结构完整性
++
++---
++
++## 4. JSON 消息格式
++
++### 4.1 OpenAI 格式（Conversation.content）
++
++```json
++[
++  { "role": "system", "content": "系统提示词" },
++  { "role": "user", "content": "用户输入" },
++  {
++    "role": "assistant",
++    "content": "助手回复",
++    "tool_calls": [
++      {
++        "id": "call_xxx",
++        "type": "function",
++        "function": { "name": "tool_name", "arguments": "{}" }
++      }
++    ]
++  },
++  { "role": "tool", "content": "工具结果", "tool_call_id": "call_xxx" }
++]
++```
++
++### 4.2 ContentPart 类型
++
++| 类型 | 结构 | 说明 |
++|------|------|------|
++| `text` | `{"type": "text", "text": "..."}` | 文本内容 |
++| `image_url` | `{"type": "image_url", "image_url": {"url": "..."}}` | 图片 URL（base64 或 http） |
++
++### 4.3 完整 Message 模型
++
++```python
++class Message(BaseModel):
++    role: Literal["system", "user", "assistant", "tool", "_checkpoint"]
++    content: str | list[ContentPart] | CheckpointData | None
++    tool_calls: list[ToolCall] | list[dict] | None = None
++    tool_call_id: str | None = None
++```
++
++---
++
++## 5. 已知限制
++
++### 5.1 ContextManager 不可直接访问
++`ContextManager` 是核心内部组件，插件**无法**直接实例化或调用。插件只能通过 `tool_loop_agent` 的参数间接控制压缩行为。
++
++### 5.2 覆盖式更新风险
++`update_conversation` 会**覆盖整个** `history` 字段，操作前需先读取完整历史，修改后再写回。容易因格式错误导致对话损坏。
++
++### 5.3 自定义 ContentPart 不支持
++`ContentPart` 注册表是核心内部的，插件**无法**注册新的 ContentPart 类型（如自定义的 `compact` 类型）。
++
++### 5.4 精细操作缺失
++`ConversationManager` 目前不提供以下操作：
++- 删除单条消息
++- 插入消息到指定位置
++- 按条件查询消息
++- 修改单条消息（必须覆盖整个 history）
++
++### 5.5 插件可操作的范围
++
++| 操作 | 方法 | 说明 |
++|------|------|------|
++| 读取历史 | `get_conversation` + `json.loads` | ✅ 支持 |
++| 覆盖历史 | `update_conversation(..., history=...)` | ✅ 支持，风险高 |
++| 追加消息对 | `add_message_pair` | ✅ 支持 |
++| 运行时注入 | `@filter.on_llm_request()` | ✅ 支持，不持久化 |
++| 自定义压缩 | `custom_compressor` 参数 | ❌ 内部预留，未暴露 |
++| 精细增删改 | — | ❌ 不支持 |
++
++---
++
++## MUST
++
++- 所有分支操作必须使用当前 `umo`，严禁跨会话复用 `conversation_id`。
++- 更新 `history` 时必须传完整的 OpenAI 格式 `list[dict]`，确保 `tool_call_id` 等字段正确。
++- 动态内容（时间、状态、记忆片段）必须使用 `extra_user_content_parts`，避免修改 `system_prompt` 破坏缓存。
++- 覆盖 `history` 前务必读取原历史，避免丢失数据。
+diff --git a/.codex/skills/skill-astrbot-dev/agent/cron.md b/.agents/skills/skill-astrbot-dev/agent/cron.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/agent/cron.md
+rename to .agents/skills/skill-astrbot-dev/agent/cron.md
+diff --git a/.codex/skills/skill-astrbot-dev/agent/index.md b/.agents/skills/skill-astrbot-dev/agent/index.md
+similarity index 71%
+rename from .codex/skills/skill-astrbot-dev/agent/index.md
+rename to .agents/skills/skill-astrbot-dev/agent/index.md
+index bff2fdc..b1e090b 100644
+--- a/.codex/skills/skill-astrbot-dev/agent/index.md
++++ b/.agents/skills/skill-astrbot-dev/agent/index.md
+@@ -10,15 +10,15 @@ category: agent
+ 
+ ## 你大概率会从这里开始
+ 
+-- 需要让模型调用工具：`skill-astrbot-dev/agent/registe tools.md`
+-- 需要选模型/Embedding/STT/TTS：`skill-astrbot-dev/agent/providers.md`
+-- 需要控制上下文与压缩：`skill-astrbot-dev/agent/context-compression.md`
+-- 需要 Hook（事件钩子/Agent 钩子）：`skill-astrbot-dev/agent/agent-related-hooks.md`
+-- 需要子智能体：`skill-astrbot-dev/agent/subagents.md`
+-- 需要代码方式注册子智能体：`skill-astrbot-dev/agent/agent-registration.md`
+-- 需要沙盒（computer use）：`skill-astrbot-dev/agent/sandbox.md`
+-- 需要定时任务（主动能力）：`skill-astrbot-dev/agent/cron.md`
+-- **v4.7.0+ Agent Runner 架构（Dify/Coze/DeerFlow）**：`skill-astrbot-dev/agent/agent-runner.md`
++- 需要让模型调用工具：`agent/register tools.md`
++- 需要选模型/Embedding/STT/TTS：`agent/providers.md`
++- 需要控制上下文与压缩：`agent/context-compression.md`
++- 需要 Hook（事件钩子/Agent 钩子）：`agent/agent-related-hooks.md`
++- 需要子智能体：`agent/subagents.md`
++- 需要代码方式注册子智能体：`agent/agent-registration.md`
++- 需要沙盒（computer use）：`agent/sandbox.md`
++- 需要定时任务（主动能力）：`agent/cron.md`
++- **v4.7.0+ Agent Runner 架构（Dify/Coze/DeerFlow）**：`agent/agent-runner.md`
+ 
+ ## 最短示例：工具循环 Agent
+ 
+diff --git a/.codex/skills/skill-astrbot-dev/agent/offical-tool-list/tools.md b/.agents/skills/skill-astrbot-dev/agent/offical-tool-list/tools.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/agent/offical-tool-list/tools.md
+rename to .agents/skills/skill-astrbot-dev/agent/offical-tool-list/tools.md
+diff --git a/.codex/skills/skill-astrbot-dev/agent/persona-control.md b/.agents/skills/skill-astrbot-dev/agent/persona-control.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/agent/persona-control.md
+rename to .agents/skills/skill-astrbot-dev/agent/persona-control.md
+diff --git a/.codex/skills/skill-astrbot-dev/agent/register skill.md b/.agents/skills/skill-astrbot-dev/agent/register skill.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/agent/register skill.md
+rename to .agents/skills/skill-astrbot-dev/agent/register skill.md
+diff --git a/.codex/skills/skill-astrbot-dev/agent/register tools.md b/.agents/skills/skill-astrbot-dev/agent/register tools.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/agent/register tools.md
+rename to .agents/skills/skill-astrbot-dev/agent/register tools.md
+diff --git a/.codex/skills/skill-astrbot-dev/agent/sandbox.md b/.agents/skills/skill-astrbot-dev/agent/sandbox.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/agent/sandbox.md
+rename to .agents/skills/skill-astrbot-dev/agent/sandbox.md
+diff --git a/.codex/skills/skill-astrbot-dev/agent/subagents.md b/.agents/skills/skill-astrbot-dev/agent/subagents.md
+similarity index 91%
+rename from .codex/skills/skill-astrbot-dev/agent/subagents.md
+rename to .agents/skills/skill-astrbot-dev/agent/subagents.md
+index 6776504..ace0292 100644
+--- a/.codex/skills/skill-astrbot-dev/agent/subagents.md
++++ b/.agents/skills/skill-astrbot-dev/agent/subagents.md
+@@ -5,7 +5,7 @@ category: agent
+ # Subagents（子智能体 / Handoff）
+ 
+ Subagent 是给主 Agent 使用的 handoff 工具。主模型通过 `transfer_to_<name>` 把任务转交给子智能体执行。
+-`from astrbot.api import agent`（详见 `skill-astrbot-dev/agent/agent-registration.md`）
++`from astrbot.api import agent`（详见 `agent/agent-registration.md`）
+ 
+ ## 配置式（推荐）
+ 
+@@ -59,7 +59,7 @@ async def writer_agent(event):
+     return None
+ ```
+ 
+-> 代码式注册、`run_hooks`、专属工具挂载见：`skill-astrbot-dev/agent/agent-registration.md`
++> 代码式注册、`run_hooks`、专属工具挂载见：`agent/agent-registration.md`
+ 
+ ## MUST
+ 
+diff --git a/.codex/skills/skill-astrbot-dev/design_standards/architecture_overview.md b/.agents/skills/skill-astrbot-dev/design_standards/architecture_overview.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/design_standards/architecture_overview.md
+rename to .agents/skills/skill-astrbot-dev/design_standards/architecture_overview.md
+diff --git a/.codex/skills/skill-astrbot-dev/design_standards/best_practices.md b/.agents/skills/skill-astrbot-dev/design_standards/best_practices.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/design_standards/best_practices.md
+rename to .agents/skills/skill-astrbot-dev/design_standards/best_practices.md
+diff --git a/.codex/skills/skill-astrbot-dev/design_standards/context_usage.md b/.agents/skills/skill-astrbot-dev/design_standards/context_usage.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/design_standards/context_usage.md
+rename to .agents/skills/skill-astrbot-dev/design_standards/context_usage.md
+diff --git a/.codex/skills/skill-astrbot-dev/design_standards/core_concepts.md b/.agents/skills/skill-astrbot-dev/design_standards/core_concepts.md
+similarity index 93%
+rename from .codex/skills/skill-astrbot-dev/design_standards/core_concepts.md
+rename to .agents/skills/skill-astrbot-dev/design_standards/core_concepts.md
+index 297206c..2a3eea3 100644
+--- a/.codex/skills/skill-astrbot-dev/design_standards/core_concepts.md
++++ b/.agents/skills/skill-astrbot-dev/design_standards/core_concepts.md
+@@ -68,14 +68,14 @@ prov_id = await self.context.get_current_chat_provider_id(umo)
+ 
+ Hooks 分为两层，不建议在"概念清单"里重复列举具体 hook 名单（容易过时）：
+ 
+-- 插件事件钩子（`@filter.on_*`）：见 `skill-astrbot-dev/plugin_config/hooks.md`
+-- Agent 运行钩子（`BaseAgentRunHooks`）：见 `skill-astrbot-dev/agent/agent-related-hooks.md`
++- 插件事件钩子（`@filter.on_*`）：见 `plugin_config/hooks.md`
++- Agent 运行钩子（`BaseAgentRunHooks`）：见 `agent/agent-related-hooks.md`
+ 
+ ### 6. Agent 智能体
+ 
+-- Agent 相关能力（tools / providers / persona / sandbox / cron / subagents）：见 `skill-astrbot-dev/agent/`
++- Agent 相关能力（tools / providers / persona / sandbox / cron / subagents）：见 `agent/`
+ - `context.tool_loop_agent(...)`: 调用工具循环 Agent（可结合子智能体 handoff）
+-- v4.7.0+ Agent Runner 架构：见 `skill-astrbot-dev/agent/agent-runner.md`
++- v4.7.0+ Agent Runner 架构：见 `agent/agent-runner.md`
+ 
+ ### 7. Tool 定义 (v4.5.7+ 推荐)
+ 
+diff --git a/.agents/skills/skill-astrbot-dev/design_standards/event_flow.md b/.agents/skills/skill-astrbot-dev/design_standards/event_flow.md
+new file mode 100644
+index 0000000..5fc538f
+--- /dev/null
++++ b/.agents/skills/skill-astrbot-dev/design_standards/event_flow.md
+@@ -0,0 +1,47 @@
++---
++category: design_standards
++---
++
++# 消息流转模型
++
++AstrBot 的消息处理遵循一个清晰的流转过程。
++
++### 核心流程图
++
++1. **接收**: 平台适配器（Platform）接收原始消息。
++2. **转换**: 调用 `convert_message` 将其封装为 `AstrBotMessage`。
++3. **提交**: 封装为 `AstrMessageEvent` 后通过 `self.commit_event(event)` 提交到事件队列。
++4. **分发**: `PlatformManager` 按优先级将事件分发给所有插件的 Handler。
++5. **处理**: 插件执行业务逻辑。
++    - 若调用 `event.stop_event()`，流程在此终止。
++6. **LLM 交互**: 若消息未被拦截，且符合 AI 触发条件，调用配置的 LLM。
++7. **结果装饰**: 发送前调用 `on_decorating_result` 钩子。
++8. **回复**: 调用 `event.send()` 或 `yield`，触发适配器的 `send` 方法。
++9. **发送**: 适配器调用平台 SDK 发送消息。
++
++### Pipeline 阶段顺序（排障关键）
++
++消息进入 pipeline 后按以下阶段依次执行（源码：`astrbot/core/pipeline/stage_order.py`）：
++
++```
++WakingCheckStage → WhitelistCheckStage → SessionStatusCheckStage → RateLimitStage
++→ ContentSafetyCheckStage → PreProcessStage → ProcessStage → ResultDecorateStage → RespondStage
++```
++
++### Hook 时序（v4.24.1 验证）
++
++- `on_llm_request`：ProcessStage 内、Agent 调用模型**之前**触发。
++  插件通过 `request.extra_user_content_parts` 注入提示词内容。
++- Agent 运行：`tool_loop_agent_runner` 执行工具循环；此处 LLM 报错会触发
++  provider fallback（日志：`Switched from ... to fallback chat provider`）。
++- `on_llm_response`：LLM 返回后、ResultDecorateStage **之前**触发。
++  **注意：其他插件（TTS、图片摘要等）可能在此阶段替换 result chain。**
++  需要 LLM 文本时应在此从 `response.completion_text` 或 `event.get_result().chain`
++  捕获，不要等到 `on_decorating_result`。
++- `on_decorating_result`：ResultDecorateStage 内、发送前触发。
++  若此前 `on_llm_response` 插件把 chain 替换为非 Plain 组件（Record/Image/Video），
++  此时 `result.get_plain_text()` 可能为空字符串。
++  Hook 按注册优先级执行；handler 可清空结果或调用 `event.stop_event()` 终止传播。
++- `after_message_sent`：消息实际发送后触发。
++- 流式输出（`STREAMING_RESULT`）会跳过 ResultDecorateStage，
++  依赖结果装饰的 hook 在流式模式下可能不生效。
+diff --git a/.codex/skills/skill-astrbot-dev/design_standards/sandbox.md b/.agents/skills/skill-astrbot-dev/design_standards/sandbox.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/design_standards/sandbox.md
+rename to .agents/skills/skill-astrbot-dev/design_standards/sandbox.md
+diff --git a/.codex/skills/skill-astrbot-dev/design_standards/visual_utils.md b/.agents/skills/skill-astrbot-dev/design_standards/visual_utils.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/design_standards/visual_utils.md
+rename to .agents/skills/skill-astrbot-dev/design_standards/visual_utils.md
+diff --git a/.codex/skills/skill-astrbot-dev/messages/components.md b/.agents/skills/skill-astrbot-dev/messages/components.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/messages/components.md
+rename to .agents/skills/skill-astrbot-dev/messages/components.md
+diff --git a/.codex/skills/skill-astrbot-dev/messages/events.md b/.agents/skills/skill-astrbot-dev/messages/events.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/messages/events.md
+rename to .agents/skills/skill-astrbot-dev/messages/events.md
+diff --git a/.codex/skills/skill-astrbot-dev/messages/model.md b/.agents/skills/skill-astrbot-dev/messages/model.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/messages/model.md
+rename to .agents/skills/skill-astrbot-dev/messages/model.md
+diff --git a/.codex/skills/skill-astrbot-dev/messages/umo.md b/.agents/skills/skill-astrbot-dev/messages/umo.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/messages/umo.md
+rename to .agents/skills/skill-astrbot-dev/messages/umo.md
+diff --git a/.codex/skills/skill-astrbot-dev/platform_adapters/adapter_interface.md b/.agents/skills/skill-astrbot-dev/platform_adapters/adapter_interface.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/platform_adapters/adapter_interface.md
+rename to .agents/skills/skill-astrbot-dev/platform_adapters/adapter_interface.md
+diff --git a/.codex/skills/skill-astrbot-dev/platform_adapters/message_conversion.md b/.agents/skills/skill-astrbot-dev/platform_adapters/message_conversion.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/platform_adapters/message_conversion.md
+rename to .agents/skills/skill-astrbot-dev/platform_adapters/message_conversion.md
+diff --git a/.codex/skills/skill-astrbot-dev/platform_adapters/telegram_media_group.md b/.agents/skills/skill-astrbot-dev/platform_adapters/telegram_media_group.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/platform_adapters/telegram_media_group.md
+rename to .agents/skills/skill-astrbot-dev/platform_adapters/telegram_media_group.md
+diff --git a/.codex/skills/skill-astrbot-dev/plugin-development-workflow.md b/.agents/skills/skill-astrbot-dev/plugin-development-workflow.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/plugin-development-workflow.md
+rename to .agents/skills/skill-astrbot-dev/plugin-development-workflow.md
+diff --git a/.codex/skills/skill-astrbot-dev/plugin_config/command.md b/.agents/skills/skill-astrbot-dev/plugin_config/command.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/plugin_config/command.md
+rename to .agents/skills/skill-astrbot-dev/plugin_config/command.md
+diff --git a/.codex/skills/skill-astrbot-dev/plugin_config/schema.md b/.agents/skills/skill-astrbot-dev/plugin_config/schema.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/plugin_config/schema.md
+rename to .agents/skills/skill-astrbot-dev/plugin_config/schema.md
+diff --git a/.codex/skills/skill-astrbot-dev/plugin_config/session_control.md b/.agents/skills/skill-astrbot-dev/plugin_config/session_control.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/plugin_config/session_control.md
+rename to .agents/skills/skill-astrbot-dev/plugin_config/session_control.md
+diff --git a/.codex/skills/skill-astrbot-dev/script/astrbot-plugin-demo/.github/workflows/release.yml b/.agents/skills/skill-astrbot-dev/script/astrbot-plugin-demo/.github/workflows/release.yml
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/script/astrbot-plugin-demo/.github/workflows/release.yml
+rename to .agents/skills/skill-astrbot-dev/script/astrbot-plugin-demo/.github/workflows/release.yml
+diff --git a/.codex/skills/skill-astrbot-dev/script/astrbot-plugin-demo/.gitignore b/.agents/skills/skill-astrbot-dev/script/astrbot-plugin-demo/.gitignore
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/script/astrbot-plugin-demo/.gitignore
+rename to .agents/skills/skill-astrbot-dev/script/astrbot-plugin-demo/.gitignore
+diff --git a/.codex/skills/skill-astrbot-dev/script/astrbot-plugin-demo/CHANGELOG.md b/.agents/skills/skill-astrbot-dev/script/astrbot-plugin-demo/CHANGELOG.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/script/astrbot-plugin-demo/CHANGELOG.md
+rename to .agents/skills/skill-astrbot-dev/script/astrbot-plugin-demo/CHANGELOG.md
+diff --git a/.codex/skills/skill-astrbot-dev/script/astrbot-plugin-demo/LICENSE b/.agents/skills/skill-astrbot-dev/script/astrbot-plugin-demo/LICENSE
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/script/astrbot-plugin-demo/LICENSE
+rename to .agents/skills/skill-astrbot-dev/script/astrbot-plugin-demo/LICENSE
+diff --git a/.codex/skills/skill-astrbot-dev/script/astrbot-plugin-demo/README.md b/.agents/skills/skill-astrbot-dev/script/astrbot-plugin-demo/README.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/script/astrbot-plugin-demo/README.md
+rename to .agents/skills/skill-astrbot-dev/script/astrbot-plugin-demo/README.md
+diff --git a/.codex/skills/skill-astrbot-dev/script/astrbot-plugin-demo/_conf_schema.json b/.agents/skills/skill-astrbot-dev/script/astrbot-plugin-demo/_conf_schema.json
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/script/astrbot-plugin-demo/_conf_schema.json
+rename to .agents/skills/skill-astrbot-dev/script/astrbot-plugin-demo/_conf_schema.json
+diff --git a/.codex/skills/skill-astrbot-dev/script/astrbot-plugin-demo/main.py b/.agents/skills/skill-astrbot-dev/script/astrbot-plugin-demo/main.py
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/script/astrbot-plugin-demo/main.py
+rename to .agents/skills/skill-astrbot-dev/script/astrbot-plugin-demo/main.py
+diff --git a/.codex/skills/skill-astrbot-dev/script/astrbot-plugin-demo/metadata.yaml b/.agents/skills/skill-astrbot-dev/script/astrbot-plugin-demo/metadata.yaml
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/script/astrbot-plugin-demo/metadata.yaml
+rename to .agents/skills/skill-astrbot-dev/script/astrbot-plugin-demo/metadata.yaml
+diff --git a/.codex/skills/skill-astrbot-dev/webui/plugin-pages.md b/.agents/skills/skill-astrbot-dev/webui/plugin-pages.md
+similarity index 100%
+rename from .codex/skills/skill-astrbot-dev/webui/plugin-pages.md
+rename to .agents/skills/skill-astrbot-dev/webui/plugin-pages.md
+diff --git a/.codex/skills/skill-astrbot-dev/Storage & Utils/kv_storage.md b/.codex/skills/skill-astrbot-dev/Storage & Utils/kv_storage.md
+deleted file mode 100644
+index 62e98f3..0000000
+--- a/.codex/skills/skill-astrbot-dev/Storage & Utils/kv_storage.md	
++++ /dev/null
+@@ -1,21 +0,0 @@
+----
+-category: storage
+----
+-
+-# 键值对存储 (KV Storage)
+-
+-AstrBot 为插件提供了简单易用的 KV 存储接口，适合存储配置、轻量级状态或用户数据。
+-
+-### 核心接口 (>= v4.9.2)
+-
+-这些方法在插件类（继承自 `Star`）中可以直接调用：
+-
+-- `await self.put_kv_data(key: str, value: Any)`: 存储数据。
+-- `await self.get_kv_data(key: str, default: Any = None) -> Any`: 获取数据。
+-- `await self.delete_kv_data(key: str)`: 删除数据。
+-
+-### 特点
+-
+-- **隔离性**: 数据按插件 ID 隔离，不同插件之间的 Key 不会冲突。
+-- **持久化**: 数据会自动持久化到 `data/metadata/kv_storage.db`（或相应目录）。
+-- **异步**: 接口均为异步方法。
+diff --git a/.codex/skills/skill-astrbot-dev/agent/context-compression.md b/.codex/skills/skill-astrbot-dev/agent/context-compression.md
+deleted file mode 100644
+index 086ff43..0000000
+--- a/.codex/skills/skill-astrbot-dev/agent/context-compression.md
++++ /dev/null
+@@ -1,50 +0,0 @@
+-
+-# 上下文控制与压缩
+-
+-
+-## 1 `context.tool_loop_agent(...)`
+-
+-用于运行 Agent 工具循环，同时传入上下文压缩参数。
+-
+-```python
+-await self.context.tool_loop_agent(event=event, chat_provider_id=prov_id, prompt="...", enforce_max_turns=20, truncate_turns=2, llm_compress_keep_recent=6)
+-```
+-
+-可用压缩参数（都可选）：
+-
+-- `enforce_max_turns: int`：最多保留多少轮对话（`-1` 不限制）。
+-- `truncate_turns: int`：触发截断时一次丢弃多少轮。
+-- `llm_compress_instruction: str | None`：LLM 压缩时的摘要指令。
+-- `llm_compress_keep_recent: int`：LLM 压缩时保留最近多少条消息不摘要。
+-- `llm_compress_provider: Provider | None`：用于压缩摘要的模型 provider。
+-- `custom_token_counter: TokenCounter | None`：自定义 token 计数器。
+-- `custom_compressor: ContextCompressor | None`：自定义压缩器。
+-
+-## 2`context.get_provider_by_id(provider_id)`
+-
+-用于拿到压缩模型实例，再传给 `llm_compress_provider`。
+-
+-```python
+-compress_prov = self.context.get_provider_by_id("openai/gpt-4o-mini")
+-```
+-
+-## 3 `context.get_current_chat_provider_id(umo)`
+-
+-用于获取当前会话正在使用的对话 provider id，常用于给 `tool_loop_agent` 传 `chat_provider_id`。
+-
+-```python
+-chat_provider_id = await self.context.get_current_chat_provider_id(event.unified_msg_origin)
+-```
+-
+-## 4 `context.get_config(umo)`
+-用于读取当前会话配置，按需决定压缩参数。
+-```python
+-cfg = self.context.get_config(event.unified_msg_origin)
+-```
+-## 示例
+-```python
+-umo = event.unified_msg_origin
+-chat_prov = await self.context.get_current_chat_provider_id(umo)
+-compress_prov = self.context.get_provider_by_id("your_compress_provider_id")
+-resp = await self.context.tool_loop_agent(event=event, chat_provider_id=chat_prov, prompt="总结最近讨论并给出下一步", enforce_max_turns=24, truncate_turns=2, llm_compress_instruction="保留任务结论、待办、关键约束", llm_compress_keep_recent=8, llm_compress_provider=compress_prov)
+-```
+\ No newline at end of file
+diff --git a/.codex/skills/skill-astrbot-dev/agent/conversation.md b/.codex/skills/skill-astrbot-dev/agent/conversation.md
+deleted file mode 100644
+index 902ab9a..0000000
+--- a/.codex/skills/skill-astrbot-dev/agent/conversation.md
++++ /dev/null
+@@ -1,113 +0,0 @@
+----
+-category: agent
+----
+-
+-# 会话与对话分支（Conversation）
+-
+-插件侧通过 `self.context.conversation_manager` 管理会话分支；会话标识使用 `event.unified_msg_origin`（`umo`）。
+-
+-## 插件可用入口
+-
+-```python
+-conv_mgr = self.context.conversation_manager
+-umo = event.unified_msg_origin
+-```
+-
+-## ConversationManager 可用方法
+-
+-- `register_on_session_deleted(callback: Callable[[str], Awaitable[None]]) -> None`：注册会话删除后的级联清理回调。
+-- `new_conversation(unified_msg_origin: str, platform_id: str | None = None, content: list[dict] | None = None, title: str | None = None, persona_id: str | None = None) -> str`：新建分支并切换为当前分支。
+-- `switch_conversation(unified_msg_origin: str, conversation_id: str) -> None`：切换当前分支。
+-- `delete_conversation(unified_msg_origin: str, conversation_id: str | None = None) -> None`：删除指定分支；不传 `conversation_id` 时删除当前分支。
+-- `delete_conversations_by_user_id(unified_msg_origin: str) -> None`：删除该会话下全部分支。
+-- `get_curr_conversation_id(unified_msg_origin: str) -> str | None`：读取当前分支 ID。
+-- `get_conversation(unified_msg_origin: str, conversation_id: str, create_if_not_exists: bool = False) -> Conversation | None`：读取分支对象。
+-- `get_conversations(unified_msg_origin: str | None = None, platform_id: str | None = None) -> list[Conversation]`：列出分支。
+-- `get_filtered_conversations(page: int = 1, page_size: int = 20, platform_ids: list[str] | None = None, search_query: str = "", **kwargs) -> tuple[list[Conversation], int]`：分页 + 条件过滤。
+-- `update_conversation(unified_msg_origin: str, conversation_id: str | None = None, history: list[dict] | None = None, title: str | None = None, persona_id: str | None = None, token_usage: int | None = None) -> None`：更新历史/标题/persona/token_usage。
+-- `add_message_pair(cid: str, user_message: UserMessageSegment | dict, assistant_message: AssistantMessageSegment | dict) -> None`：向指定分支追加一组 user/assistant 消息。
+-- `get_human_readable_context(unified_msg_origin: str, conversation_id: str, page: int = 1, page_size: int = 10) -> tuple[list[str], int]`：获取分页后的可读上下文。
+-
+-## 最小示例
+-
+-```python
+-cid = await self.context.conversation_manager.get_curr_conversation_id(event.unified_msg_origin)
+-```
+-
+-```python
+-cid = await self.context.conversation_manager.new_conversation(event.unified_msg_origin, title="新分支")
+-```
+-
+-```python
+-await self.context.conversation_manager.update_conversation(event.unified_msg_origin, conversation_id=cid, title="重命名", persona_id="assistant_default")
+-```
+-
+-```python
+-contexts, total_pages = await self.context.conversation_manager.get_human_readable_context(event.unified_msg_origin, cid, page=1, page_size=10)
+-```
+-
+-## MUST
+-
+-- 所有分支操作必须使用当前会话的 `umo`，不要跨会话复用 `conversation_id`。
+-- 更新历史时必须传 OpenAI 风格 `list[dict]` 消息结构。
+-
+----
+-
+-## LLM 请求提示词注入
+-
+-通过 `@filter.on_llm_request()` 拦截并修改 LLM 请求。
+-
+-```python
+-from astrbot.api.event import filter, AstrMessageEvent
+-from astrbot.api.provider import ProviderRequest
+-
+-@filter.on_llm_request()
+-async def on_req(self, event: AstrMessageEvent, req: ProviderRequest):
+-    # 修改系统提示词（仅稳定内容）
+-    req.system_prompt += "\n\n[全局规则] 回答必须简洁。"
+-```
+-
+-### ProviderRequest 关键属性
+-
+-| 属性 | 类型 | 用途 |
+-|------|------|------|
+-| `system_prompt` | `str` | 系统提示词（请求最前） |
+-| `prompt` | `str \| None` | 本轮用户输入 |
+-| `extra_user_content_parts` | `list[ContentPart]` | 用户消息后的额外内容 |
+-| `contexts` | `list[dict]` | OpenAI 格式完整上下文 |
+-
+-### 1. 系统提示词（system_prompt）
+-
+-* **`system_prompt += ...`**
+-  * 适合追加**稳定、长期有效**的角色设定或全局规则。
+-  * **警告**：每轮变化的内容（时间、好感度、记忆片段）会破坏模型服务端提示词缓存，导致成本和首 token 延迟增加 7-20 倍。
+-
+-### 2. 动态内容（extra_user_content_parts）
+-
+-* **`req.extra_user_content_parts.append(...)`**
+-  * 适合追加每轮变化的**动态上下文**（当前时间、状态面板、短期记忆）。
+-  * 追加在用户消息之后，**不影响缓存命中**。
+-  * 仅参与本轮请求、不持久化到历史：调用 `.mark_as_temp()`（`>= v4.24.0`）。
+-
+-```python
+-from astrbot.core.agent.message import TextPart
+-
+-@filter.on_llm_request()
+-async def add_dynamic_context(self, event: AstrMessageEvent, req: ProviderRequest):
+-    part = TextPart(
+-        text=(
+-            "<context>\n"
+-            f"当前时间：{datetime.now()}\n"
+-            "好感度：72\n"
+-            "</context>"
+-        )
+-    )
+-    part.mark_as_temp()  # 不写入对话历史
+-    req.extra_user_content_parts.append(part)
+-```
+-
+-### 3. 完整上下文替换（contexts）
+-
+-* **`req.contexts = [...]`**
+-  * 直接替换 OpenAI 格式的消息历史。
+-  * 风险较高，需谨慎维护消息结构完整性。
+\ No newline at end of file
+diff --git a/.codex/skills/skill-astrbot-dev/design_standards/event_flow.md b/.codex/skills/skill-astrbot-dev/design_standards/event_flow.md
+deleted file mode 100644
+index 16389ba..0000000
+--- a/.codex/skills/skill-astrbot-dev/design_standards/event_flow.md
++++ /dev/null
+@@ -1,20 +0,0 @@
+----
+-category: design_standards
+----
+-
+-# 消息流转模型
+-
+-AstrBot 的消息处理遵循一个清晰的流转过程。
+-
+-### 核心流程图
+-
+-1. **接收**: 平台适配器（Platform）接收原始消息。
+-2. **转换**: 调用 `convert_message` 将其封装为 `AstrBotMessage`。
+-3. **提交**: 封装为 `AstrMessageEvent` 后通过 `self.commit_event(event)` 提交到事件队列。
+-4. **分发**: `PlatformManager` 按优先级将事件分发给所有插件的 Handler。
+-5. **处理**: 插件执行业务逻辑。
+-    - 若调用 `event.stop_event()`，流程在此终止。
+-6. **LLM 交互**: 若消息未被拦截，且符合 AI 触发条件，调用配置的 LLM。
+-7. **结果装饰**: 发送前调用 `on_decorating_result` 钩子。
+-8. **回复**: 调用 `event.send()` 或 `yield`，触发适配器的 `send` 方法。
+-9. **发送**: 适配器调用平台 SDK 发送消息。
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 55ff0cc..e7d6e45 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,44 @@
+ # Changelog
+ 
++## v2.1.2 - 2026-11-10
++
++- 发送接口正常返回后清理本次下载的原图及压缩图，下载、压缩或发送失败时保留文件。
++- 清理仅针对插件临时目录中的本次图片，跳过符号链接及目录外文件；清理失败只记录日志。
++
++## v2.1.1 - 2026-11-10
++
++- 新增根目录 `logo.png`，用于插件展示，并在 README 引用。
++- 在 README 补充绑定管理、消息匹配、图片下载、WebP 压缩、发送及失败处理流程。
++
++## v2.1.0 - 2026-11-10
++
++- 增加固定的 4 MB（4,000,000 字节）发送上限：超限图片自动转为 WebP，逐步降低质量及尺寸。
++- 动图转 WebP 时保留动画，图片压缩在后台线程中执行，并限制同时压缩数量及解码像素/帧数。
++- 压缩失败时提示错误，发送前再次检查文件大小，避免发送超限原图。
++- 增加 Pillow 12.3.0 依赖，不新增配置项或自动清理任务。
++
++## v2.0.2 - 2026-11-10
++
++- 在 `metadata.yaml` 中声明支持 QQ 官方机器人（`qq_official`）、个人微信（`weixin_oc`）和 KOOK（`kook`）。
++- 同步更新 README 的支持平台说明。
++
++## v2.0.1 - 2026-11-10
++
++- 将插件常量、图片下载和消息发送合并到 `main.py`，运行代码仅保留 `main.py` 与 `trigger_store.py`。
++- 移除旧版 `config.json` 数据迁移逻辑，启动时仅读取插件数据目录中的 `triggers.json`。
++
++## v2.0.0 - 2026-11-10
++
++- 移除图片压缩、压缩重试和定时撤回功能，以及对应的配置项和 `_conf_schema.json`。
++- 删除 `settings.py` 中的配置读取逻辑，插件标识及数据文件名移至 `constants.py`。
++- 下载原图后统一通过 AstrBot 消息接口发送，删除平台专用发送/撤回代码及 Pillow 依赖。
++- 保留触发词数据与旧数据迁移，下载的图片继续保留在 `temp/` 目录。
++
++## v1.3.3 - 2026-11-10
++
++- 移除发送图片后的自动清理任务，下载的原图及尺寸处理后的图片均保留在插件 `temp/` 目录。
++- 删除清理路径跟踪，压缩重试继续使用下载的原图。
++
+ ## v1.3.2 - 2026-05-28
+ 
+ - 修复 OneBot 发送能力检测逻辑：`send_group_msg` 与 `send_private_msg` 改为满足其一即可，兼容仅实现单一发送接口的适配器。
+diff --git a/README.md b/README.md
+index f72934a..174d0c6 100644
+--- a/README.md
++++ b/README.md
+@@ -1,5 +1,7 @@
+ # astrbot_plugin_img
+ 
++![插件 Logo](logo.png)
++
+ 自定义图片触发词插件 for AstrBot。
+ 
+ > 极简图片发送插件：为触发词绑定一个直接图片 URL，发送触发词即可返回图片。
+@@ -10,6 +12,21 @@
+ - 删除图片触发词
+ - 列出所有图片触发词
+ - 发送触发词自动返回对应图片
++- 超过 4 MB 的图片自动压缩为 WebP，发送文件不超过 4,000,000 字节
++
++声明支持 QQ 官方机器人、个人微信（ClawBot）和 KOOK。
++
++## 处理流程
++
++1. 启动时读取插件数据目录下的 `triggers.json`，加载触发词与图片 URL 的绑定。
++2. 添加或删除绑定后立即保存；触发词会去除首尾空白并转为小写，同名绑定会被覆盖。列表命令只展示触发词。
++3. 收到消息后按完整文本匹配触发词，忽略以 `/` 开头的消息和未匹配的消息。
++4. 命中后使用 `aiohttp` 下载图片，超时为 10 秒；仅接受 HTTP 200 且 `Content-Type` 为 `image/*` 的响应，保存到 `temp/`。
++5. 文件不超过 4,000,000 字节时保留原图；超限时在后台线程中用 Pillow 转成 WebP，依次尝试质量 85、65、45、25。仍超限则将宽高缩至 75% 后重复尝试。
++6. 发送前再次检查大小，通过 AstrBot 的 `Image` 消息组件发送。下载、压缩或发送失败时回复对应提示，随后结束该消息事件的处理。
++7. 发送接口正常返回后，清理本次下载的原图及压缩图；失败时保留文件，清理失败只记录日志。
++
++失败时保留的图片可在 `temp/` 中查看或手动清理；绑定数据由所有会话共用。
+ 
+ ## 安装
+ 
+@@ -52,26 +69,21 @@ pip install -r requirements.txt
+ - 只支持直接图片 URL。
+ - 图片 URL 必须以 `http://` 或 `https://` 开头。
+ - 发送时插件会校验目标响应的 `Content-Type` 是否为 `image/*`。
+-- 发送时会先把图片下载到本地临时文件，再交给 AstrBot 发送，便于适配 Telegram、KOOK 等平台。
+-- 对非动图图片，插件会尝试按 Telegram `sendPhoto` 的尺寸限制进行缩放或补边处理。
++- 发送时会先把图片下载到本地临时文件，再交给 AstrBot 发送。
++- 不超过 4 MB 的图片原样发送；超限图片先转为 WebP，逐步降低质量，必要时等比缩小尺寸。
++- 动图压缩时保留动画帧、帧时长和循环设置。无法压缩到上限内或超出像素/帧数处理限制时会提示失败，不发送超限原图。
+ - 不支持 API 返回 JSON、文本链接、本地图片路径或视频。
+ 
+ ## 数据存储
+ 
+ - 触发词数据保存到 `data/plugin_data/astrbot_plugin_img/triggers.json`。
+-- 临时图片保存到 `data/plugin_data/astrbot_plugin_img/temp/`，发送后会延迟清理。
+-- 旧版本插件根目录下的 `config.json` 或 `data/plugin_data/astrbot_plugin_img/config.json` 会在首次启动时自动迁移到新位置。
+-- `data/config/` 是 AstrBot 核心配置和插件 `_conf_schema.json` 配置目录，不用于保存本插件运行时触发词数据。
++- 下载的原图与压缩后的 WebP 保存到 `data/plugin_data/astrbot_plugin_img/temp/`；发送接口正常返回后删除本次图片，下载、压缩或发送失败时保留。历史失败文件可按需手动清理。
+ 
+ ## 插件配置
+ 
+-AstrBot 会根据 `_conf_schema.json` 在 `data/config/astrbot_plugin_img_config.json` 生成插件配置。
++无需额外配置。插件下载图片并按固定的 4 MB 上限处理后，通过 AstrBot 消息接口发送。
+ 
+-| 配置项 | 默认值 | 说明 |
+-| --- | --- | --- |
+-| `enable_image_compression` | `true` | 发送前是否压缩/补边图片。关闭后下载原图并直接发送。 |
+-| `enable_compress_retry` | `true` | 原图发送失败后，是否压缩/补边并重试一次。 |
+-| `recall_after_seconds` | `0` | 多少秒后撤回图片。`0` 表示不撤回；仅在平台适配器能返回已发送消息 ID 并支持删除消息时生效。 |
++旧版压缩开关、压缩重试和定时撤回配置不再读取。
+ 
+ ## 版本维护
+ 
+@@ -80,4 +92,8 @@ AstrBot 会根据 `_conf_schema.json` 在 `data/config/astrbot_plugin_img_config
+ 
+ ## 开发
+ 
+-基于 AstrBot 插件框架开发，使用 `aiohttp` 下载直接图片 URL，并使用 `Pillow` 处理图片尺寸。OneBot/aiocqhttp 平台在开启撤回时会直接调用平台发送 API 以获取 `message_id`。
++基于 AstrBot 插件框架开发，使用 `aiohttp` 下载直接图片 URL，再通过 AstrBot 的 `Image` 消息组件发送本地图片。
++
++使用来自 [PyPI 的 Pillow 12.3.0](https://pypi.org/project/pillow/12.3.0/) 编码 WebP，压缩在后台线程中执行。Pillow 依赖已固定版本，运行环境需要 Python 3.10 或以上。
++
++运行代码分为两个文件：`main.py` 负责命令、触发匹配、图片下载与发送；`trigger_store.py` 负责触发词校验与数据读写。
+diff --git a/_conf_schema.json b/_conf_schema.json
+deleted file mode 100644
+index 74ef816..0000000
+--- a/_conf_schema.json
++++ /dev/null
+@@ -1,20 +0,0 @@
+-{
+-  "enable_image_compression": {
+-    "description": "是否开启图片压缩",
+-    "type": "bool",
+-    "default": true,
+-    "hint": "开启后，发送前会用 Pillow 对非动图图片做尺寸兼容处理；关闭后下载原图并直接发送。"
+-  },
+-  "enable_compress_retry": {
+-    "description": "是否开启压缩后重试",
+-    "type": "bool",
+-    "default": true,
+-    "hint": "开启后，如果原图发送失败，会尝试压缩/补边后重新发送一次。"
+-  },
+-  "recall_after_seconds": {
+-    "description": "多少秒之后撤回",
+-    "type": "int",
+-    "default": 0,
+-    "hint": "0 表示不撤回；撤回依赖平台适配器是否能返回已发送消息 ID 并提供删除消息能力。"
+-  }
+-}
+diff --git a/docs/superpowers/plans/2026-04-28-direct-image-trigger.md b/docs/superpowers/plans/2026-04-28-direct-image-trigger.md
+deleted file mode 100644
+index dd16806..0000000
+--- a/docs/superpowers/plans/2026-04-28-direct-image-trigger.md
++++ /dev/null
+@@ -1,362 +0,0 @@
+-# Direct Image Trigger Implementation Plan
+-
+-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+-
+-**Goal:** Replace the current mixed URL/API/local image plugin with a minimal direct image URL trigger plugin.
+-
+-**Architecture:** Keep one plugin class in `main.py` with a simple `trigger_map` dictionary persisted to `config.json`. Add small pure helpers for trigger normalization, URL validation, and config migration so the behavior can be tested without running AstrBot. Runtime command handlers remain AstrBot event generators.
+-
+-**Tech Stack:** Python, AstrBot plugin APIs, `aiohttp`, built-in `unittest`.
+-
+----
+-
+-## File Structure
+-
+-- `main.py`: minimal AstrBot plugin, direct URL trigger storage, add/delete commands, auto-trigger image sending.
+-- `tests/test_direct_image_plugin.py`: unit tests for trigger normalization, URL validation, config loading, and config saving. The test file stubs AstrBot modules before importing `main.py`.
+-- `README.md`: usage documentation for the two commands and direct trigger behavior.
+-- `metadata.yaml`: short description aligned with direct URL-only behavior.
+-
+-### Task 1: Add Behavior Tests
+-
+-**Files:**
+-- Create: `tests/test_direct_image_plugin.py`
+-- Test: `tests/test_direct_image_plugin.py`
+-
+-- [ ] **Step 1: Write the failing tests**
+-
+-```python
+-import importlib
+-import json
+-import sys
+-import types
+-import unittest
+-from pathlib import Path
+-from tempfile import TemporaryDirectory
+-
+-
+-def install_astrbot_stubs():
+-    astrbot = types.ModuleType("astrbot")
+-    astrbot_api = types.ModuleType("astrbot.api")
+-    event_mod = types.ModuleType("astrbot.api.event")
+-    star_mod = types.ModuleType("astrbot.api.star")
+-    message_components_mod = types.ModuleType("astrbot.api.message_components")
+-
+-    class DummyFilter:
+-        class EventMessageType:
+-            ALL = "all"
+-
+-        @staticmethod
+-        def command(_name):
+-            def decorator(func):
+-                return func
+-            return decorator
+-
+-        @staticmethod
+-        def event_message_type(_message_type):
+-            def decorator(func):
+-                return func
+-            return decorator
+-
+-    class AstrMessageEvent:
+-        pass
+-
+-    class Context:
+-        pass
+-
+-    class Star:
+-        def __init__(self, context):
+-            self.context = context
+-
+-    def register(*_args, **_kwargs):
+-        def decorator(cls):
+-            return cls
+-        return decorator
+-
+-    class Image:
+-        def __init__(self, file):
+-            self.file = file
+-
+-    event_mod.filter = DummyFilter
+-    event_mod.AstrMessageEvent = AstrMessageEvent
+-    star_mod.Context = Context
+-    star_mod.Star = Star
+-    star_mod.register = register
+-    message_components_mod.Image = Image
+-
+-    sys.modules["astrbot"] = astrbot
+-    sys.modules["astrbot.api"] = astrbot_api
+-    sys.modules["astrbot.api.event"] = event_mod
+-    sys.modules["astrbot.api.star"] = star_mod
+-    sys.modules["astrbot.api.message_components"] = message_components_mod
+-
+-
+-class DirectImageConfigTests(unittest.TestCase):
+-    def setUp(self):
+-        install_astrbot_stubs()
+-        sys.modules.pop("main", None)
+-        self.main = importlib.import_module("main")
+-
+-    def test_normalize_trigger_strips_and_lowercases(self):
+-        self.assertEqual(self.main.normalize_trigger("  Cat  "), "cat")
+-
+-    def test_is_http_url_accepts_only_http_and_https(self):
+-        self.assertTrue(self.main.is_http_url("https://example.com/cat.jpg"))
+-        self.assertTrue(self.main.is_http_url("http://example.com/cat.jpg"))
+-        self.assertFalse(self.main.is_http_url("ftp://example.com/cat.jpg"))
+-        self.assertFalse(self.main.is_http_url("example.com/cat.jpg"))
+-
+-    def test_load_trigger_map_reads_only_string_url_entries(self):
+-        with TemporaryDirectory() as temp_dir:
+-            config_path = Path(temp_dir) / "config.json"
+-            config_path.write_text(
+-                json.dumps(
+-                    {
+-                        "trigger_map": {
+-                            "Cat": "https://example.com/cat.jpg",
+-                            "old": {"type": "url", "value": "https://example.com/old.jpg"},
+-                            "bad": 123,
+-                        }
+-                    }
+-                ),
+-                encoding="utf-8",
+-            )
+-
+-            result = self.main.load_trigger_map(config_path)
+-
+-        self.assertEqual(result, {"cat": "https://example.com/cat.jpg"})
+-
+-    def test_save_trigger_map_writes_minimal_config_shape(self):
+-        with TemporaryDirectory() as temp_dir:
+-            config_path = Path(temp_dir) / "config.json"
+-
+-            self.main.save_trigger_map({"cat": "https://example.com/cat.jpg"}, config_path)
+-
+-            result = json.loads(config_path.read_text(encoding="utf-8"))
+-
+-        self.assertEqual(result, {"trigger_map": {"cat": "https://example.com/cat.jpg"}})
+-
+-
+-if __name__ == "__main__":
+-    unittest.main()
+-```
+-
+-- [ ] **Step 2: Run tests to verify they fail**
+-
+-Run: `python -m unittest tests/test_direct_image_plugin.py -v`
+-
+-Expected: FAIL because `normalize_trigger`, `is_http_url`, `load_trigger_map`, and `save_trigger_map` do not exist yet.
+-
+-### Task 2: Rewrite Plugin
+-
+-**Files:**
+-- Modify: `main.py`
+-- Test: `tests/test_direct_image_plugin.py`
+-
+-- [ ] **Step 1: Implement the minimal direct URL plugin**
+-
+-```python
+-import json
+-import logging
+-from pathlib import Path
+-from typing import Optional
+-
+-import aiohttp
+-from astrbot.api.event import AstrMessageEvent, filter
+-from astrbot.api.message_components import Image
+-from astrbot.api.star import Context, Star, register
+-
+-DATA_FILE = Path(__file__).parent / "config.json"
+-
+-logger = logging.getLogger(__name__)
+-
+-
+-def normalize_trigger(trigger: str) -> str:
+-    return trigger.strip().lower()
+-
+-
+-def is_http_url(url: str) -> bool:
+-    return url.startswith(("http://", "https://"))
+-
+-
+-def load_trigger_map(config_path: Path = DATA_FILE) -> dict[str, str]:
+-    if not config_path.exists():
+-        return {}
+-    try:
+-        with open(config_path, "r", encoding="utf-8") as f:
+-            data = json.load(f)
+-    except Exception as exc:
+-        logger.error("加载配置失败: %s", exc)
+-        return {}
+-
+-    raw_map = data.get("trigger_map", {})
+-    if not isinstance(raw_map, dict):
+-        return {}
+-
+-    return {
+-        normalize_trigger(trigger): url
+-        for trigger, url in raw_map.items()
+-        if isinstance(trigger, str) and isinstance(url, str) and is_http_url(url)
+-    }
+-
+-
+-def save_trigger_map(trigger_map: dict[str, str], config_path: Path = DATA_FILE) -> None:
+-    data = {"trigger_map": trigger_map}
+-    with open(config_path, "w", encoding="utf-8") as f:
+-        json.dump(data, f, ensure_ascii=False, indent=4)
+-
+-
+-@register("astrbot_plugin_img", "djwlx", "自定义图片触发词插件，仅支持直接图片URL", "v1.1.0")
+-class DirectImageTriggerPlugin(Star):
+-    def __init__(self, context: Context):
+-        super().__init__(context)
+-        self.trigger_map: dict[str, str] = load_trigger_map()
+-
+-    @filter.command("添加图片触发词")
+-    async def add_image_trigger(self, event: AstrMessageEvent, trigger: str, url: str):
+-        trigger_key = normalize_trigger(trigger)
+-        if not trigger_key:
+-            yield event.plain_result("触发词不能为空")
+-            return
+-        if not is_http_url(url):
+-            yield event.plain_result("图片 URL 必须以 http:// 或 https:// 开头")
+-            return
+-
+-        self.trigger_map[trigger_key] = url
+-        save_trigger_map(self.trigger_map)
+-        yield event.plain_result(f"已添加图片触发词: {trigger_key}")
+-
+-    @filter.command("删除图片触发词")
+-    async def delete_image_trigger(self, event: AstrMessageEvent, trigger: str):
+-        trigger_key = normalize_trigger(trigger)
+-        if trigger_key not in self.trigger_map:
+-            yield event.plain_result(f"触发词不存在: {trigger_key}")
+-            return
+-
+-        del self.trigger_map[trigger_key]
+-        save_trigger_map(self.trigger_map)
+-        yield event.plain_result(f"已删除图片触发词: {trigger_key}")
+-
+-    @filter.event_message_type(filter.EventMessageType.ALL)
+-    async def on_message(self, event: AstrMessageEvent):
+-        trigger_key = normalize_trigger(event.message_str)
+-        if trigger_key.startswith("/"):
+-            return
+-        if trigger_key not in self.trigger_map:
+-            return
+-
+-        image_url = await self._resolve_direct_image_url(self.trigger_map[trigger_key])
+-        if image_url:
+-            yield event.chain_result([Image(file=image_url)])
+-            event.stop_event()
+-        else:
+-            yield event.plain_result("获取图片失败，请检查图片 URL 是否有效")
+-
+-    async def _resolve_direct_image_url(self, url: str) -> Optional[str]:
+-        try:
+-            async with aiohttp.ClientSession() as session:
+-                async with session.get(
+-                    url,
+-                    allow_redirects=True,
+-                    timeout=aiohttp.ClientTimeout(total=10),
+-                ) as resp:
+-                    if resp.status != 200:
+-                        return None
+-                    content_type = resp.headers.get("Content-Type", "").lower()
+-                    if not content_type.startswith("image/"):
+-                        return None
+-                    return str(resp.url)
+-        except Exception as exc:
+-            logger.error("获取图片失败: %s", exc)
+-            return None
+-```
+-
+-- [ ] **Step 2: Run tests to verify they pass**
+-
+-Run: `python -m unittest tests/test_direct_image_plugin.py -v`
+-
+-Expected: PASS with 4 tests.
+-
+-- [ ] **Step 3: Compile the plugin**
+-
+-Run: `python -m py_compile main.py`
+-
+-Expected: exit 0.
+-
+-### Task 3: Update Documentation
+-
+-**Files:**
+-- Modify: `README.md`
+-- Modify: `metadata.yaml`
+-
+-- [ ] **Step 1: Replace README with direct URL usage**
+-
+-```markdown
+-# astrbot_plugin_img
+-
+-自定义图片触发词插件 for AstrBot。
+-
+-> 极简图片发送插件：为触发词绑定一个直接图片 URL，发送触发词即可返回图片。
+-
+-## 功能
+-
+-- 添加图片触发词
+-- 删除图片触发词
+-- 发送触发词自动返回对应图片
+-
+-## 安装
+-
+-将插件文件放置在 AstrBot 插件目录下，并安装依赖：
+-
+-```bash
+-pip install -r requirements.txt
+-```
+-
+-## 使用说明
+-
+-### 添加图片触发词
+-
+-```text
+-/添加图片触发词 猫 https://example.com/cat.jpg
+-```
+-
+-### 删除图片触发词
+-
+-```text
+-/删除图片触发词 猫
+-```
+-
+-### 发送图片
+-
+-发送已配置的触发词即可自动回复图片：
+-
+-```text
+-猫
+-```
+-
+-## 注意事项
+-
+-- 只支持直接图片 URL。
+-- 图片 URL 必须以 `http://` 或 `https://` 开头。
+-- 发送时插件会校验目标响应的 `Content-Type` 是否为 `image/*`。
+-- 不支持 API 返回 JSON、文本链接、本地图片路径或视频。
+-
+-## 开发
+-
+-基于 AstrBot 插件框架开发，使用 `aiohttp` 校验直接图片 URL。
+-```
+-
+-- [ ] **Step 2: Update metadata description**
+-
+-Set `metadata.yaml` description fields to direct URL-only wording:
+-
+-```yaml
+-desc: 极简图片触发词插件，支持为触发词绑定直接图片URL。
+-version: v1.1.0
+-```
+-
+-- [ ] **Step 3: Run verification**
+-
+-Run: `python -m unittest tests/test_direct_image_plugin.py -v && python -m py_compile main.py`
+-
+-Expected: tests pass and compile exits 0.
+diff --git a/image_files.py b/image_files.py
+deleted file mode 100644
+index e98d194..0000000
+--- a/image_files.py
++++ /dev/null
+@@ -1,137 +0,0 @@
+-import logging
+-import math
+-import uuid
+-from pathlib import Path
+-from typing import Optional, Tuple
+-
+-import aiohttp
+-
+-TELEGRAM_PHOTO_SAFE_SIDE_SUM = 9900
+-TELEGRAM_PHOTO_SAFE_RATIO = 19.5
+-
+-logger = logging.getLogger(__name__)
+-
+-CONTENT_TYPE_EXTENSIONS = {
+-    "image/jpeg": ".jpg",
+-    "image/jpg": ".jpg",
+-    "image/png": ".png",
+-    "image/gif": ".gif",
+-    "image/webp": ".webp",
+-    "image/bmp": ".bmp",
+-}
+-
+-
+-def content_type_to_extension(content_type: str) -> str:
+-    media_type = content_type.split(";", 1)[0].strip().lower()
+-    return CONTENT_TYPE_EXTENSIONS.get(media_type, ".jpg")
+-
+-
+-def safe_photo_canvas_size(width: int, height: int) -> Tuple[int, int]:
+-    target_width = width
+-    target_height = height
+-
+-    if target_width > target_height * TELEGRAM_PHOTO_SAFE_RATIO:
+-        target_height = math.ceil(target_width / TELEGRAM_PHOTO_SAFE_RATIO)
+-    elif target_height > target_width * TELEGRAM_PHOTO_SAFE_RATIO:
+-        target_width = math.ceil(target_height / TELEGRAM_PHOTO_SAFE_RATIO)
+-
+-    side_sum = target_width + target_height
+-    if side_sum > TELEGRAM_PHOTO_SAFE_SIDE_SUM:
+-        scale = TELEGRAM_PHOTO_SAFE_SIDE_SUM / side_sum
+-        target_width = max(1, math.floor(target_width * scale))
+-        target_height = max(1, math.floor(target_height * scale))
+-
+-    return target_width, target_height
+-
+-
+-class ImageFileService:
+-    def __init__(self, temp_dir: Path):
+-        self.temp_dir = temp_dir
+-
+-    async def download_direct_image(self, url: str) -> Optional[str]:
+-        try:
+-            async with aiohttp.ClientSession() as session:
+-                async with session.get(
+-                    url,
+-                    allow_redirects=True,
+-                    timeout=aiohttp.ClientTimeout(total=10),
+-                ) as resp:
+-                    if resp.status != 200:
+-                        return None
+-
+-                    content_type = resp.headers.get("Content-Type", "").lower()
+-                    if not content_type.startswith("image/"):
+-                        return None
+-
+-                    ext = content_type_to_extension(content_type)
+-                    image_path = self.temp_dir / f"{uuid.uuid4()}{ext}"
+-                    data = await resp.read()
+-                    with open(image_path, "wb") as f:
+-                        f.write(data)
+-                    return str(image_path)
+-        except Exception as exc:
+-            logger.error("获取图片失败: %s", exc)
+-            return None
+-
+-    def normalize_photo_dimensions(self, image_path: str) -> str:
+-        if image_path.lower().endswith(".gif"):
+-            return image_path
+-
+-        try:
+-            from PIL import Image as PILImage
+-            from PIL import ImageOps, UnidentifiedImageError
+-        except Exception as exc:
+-            logger.warning("Pillow 未安装，跳过图片尺寸处理: %s", exc)
+-            return image_path
+-
+-        try:
+-            with PILImage.open(image_path) as image:
+-                if getattr(image, "is_animated", False):
+-                    return image_path
+-
+-                image = ImageOps.exif_transpose(image)
+-                width, height = image.size
+-                if width <= 0 or height <= 0:
+-                    return image_path
+-
+-                target_width, target_height = safe_photo_canvas_size(width, height)
+-                needs_canvas = (target_width, target_height) != (width, height)
+-                has_alpha = image.mode in ("RGBA", "LA") or (
+-                    image.mode == "P" and "transparency" in image.info
+-                )
+-
+-                if not needs_canvas:
+-                    return image_path
+-
+-                image = image.convert("RGBA" if has_alpha else "RGB")
+-                canvas_mode = "RGBA" if has_alpha else "RGB"
+-                background = (255, 255, 255, 0) if has_alpha else (255, 255, 255)
+-                canvas = PILImage.new(
+-                    canvas_mode, (target_width, target_height), background
+-                )
+-
+-                scale = min(target_width / width, target_height / height, 1)
+-                resized_width = max(1, math.floor(width * scale))
+-                resized_height = max(1, math.floor(height * scale))
+-                if (resized_width, resized_height) != (width, height):
+-                    image = image.resize(
+-                        (resized_width, resized_height), PILImage.Resampling.LANCZOS
+-                    )
+-
+-                left = (target_width - resized_width) // 2
+-                top = (target_height - resized_height) // 2
+-                canvas.paste(image, (left, top), image if has_alpha else None)
+-
+-                suffix = ".png" if has_alpha else ".jpg"
+-                normalized_path = self.temp_dir / f"{uuid.uuid4()}_normalized{suffix}"
+-                if has_alpha:
+-                    canvas.save(normalized_path, "PNG", optimize=True)
+-                else:
+-                    canvas.save(normalized_path, "JPEG", quality=90, optimize=True)
+-                return str(normalized_path)
+-        except UnidentifiedImageError as exc:
+-            logger.warning("图片格式无法识别，跳过尺寸处理: %s", exc)
+-            return image_path
+-        except Exception as exc:
+-            logger.warning("图片尺寸处理失败，使用原图: %s", exc)
+-            return image_path
+diff --git a/main.py b/main.py
+index 3bf255d..88abdfb 100644
+--- a/main.py
++++ b/main.py
+@@ -1,113 +1,71 @@
++import asyncio
++import io
+ import logging
++import uuid
+ from pathlib import Path
+-from typing import Any, Dict, List, Optional, Tuple
++from typing import Dict, Optional
+ 
+-from astrbot.api.event import AstrMessageEvent, filter
++import aiohttp
++from PIL import Image as PILImage
++from PIL import ImageOps
++
++from astrbot.api.event import AstrMessageEvent, MessageChain, filter
++from astrbot.api.message_components import Image, Plain
+ from astrbot.api.star import Context, Star, register
+ 
+ try:
+-    from .image_files import (
+-        ImageFileService,
+-        content_type_to_extension,
+-        safe_photo_canvas_size,
+-    )
+-    from .message_sender import ImageMessageSender
+-    from .settings import (
+-        DEFAULT_ENABLE_COMPRESS_RETRY,
+-        DEFAULT_ENABLE_IMAGE_COMPRESSION,
+-        DEFAULT_RECALL_AFTER_SECONDS,
+-        LEGACY_DATA_FILE,
+-        LEGACY_TRIGGER_DATA_FILENAME,
+-        PLUGIN_NAME,
+-        PLUGIN_VERSION,
+-        TRIGGER_DATA_FILENAME,
+-        read_bool_config,
+-        read_non_negative_int_config,
+-    )
+     from .trigger_store import (
+         get_plugin_data_dir,
+         is_http_url,
+         load_trigger_map,
+-        migrate_legacy_trigger_data,
+         normalize_trigger,
+         save_trigger_map,
+     )
+ except ImportError:
+     if __package__:
+         raise
+-    from image_files import (
+-        ImageFileService,
+-        content_type_to_extension,
+-        safe_photo_canvas_size,
+-    )
+-    from message_sender import ImageMessageSender
+-    from settings import (
+-        DEFAULT_ENABLE_COMPRESS_RETRY,
+-        DEFAULT_ENABLE_IMAGE_COMPRESSION,
+-        DEFAULT_RECALL_AFTER_SECONDS,
+-        LEGACY_DATA_FILE,
+-        LEGACY_TRIGGER_DATA_FILENAME,
+-        PLUGIN_NAME,
+-        PLUGIN_VERSION,
+-        TRIGGER_DATA_FILENAME,
+-        read_bool_config,
+-        read_non_negative_int_config,
+-    )
+     from trigger_store import (
+         get_plugin_data_dir,
+         is_http_url,
+         load_trigger_map,
+-        migrate_legacy_trigger_data,
+         normalize_trigger,
+         save_trigger_map,
+     )
+ 
+ logger = logging.getLogger(__name__)
+ 
++PLUGIN_NAME = "astrbot_plugin_img"
++PLUGIN_VERSION = "v2.1.2"
++TRIGGER_DATA_FILENAME = "triggers.json"
++MAX_IMAGE_BYTES = 4_000_000
++
++CONTENT_TYPE_EXTENSIONS = {
++    "image/jpeg": ".jpg",
++    "image/jpg": ".jpg",
++    "image/png": ".png",
++    "image/gif": ".gif",
++    "image/webp": ".webp",
++    "image/bmp": ".bmp",
++}
++
++
++def content_type_to_extension(content_type: str) -> str:
++    media_type = content_type.split(";", 1)[0].strip().lower()
++    return CONTENT_TYPE_EXTENSIONS.get(media_type, ".jpg")
++
+ 
+ @register(PLUGIN_NAME, "djwlx", "自定义图片触发词插件，仅支持直接图片URL", PLUGIN_VERSION)
+ class DirectImageTriggerPlugin(Star):
+-    def __init__(self, context: Context, config: Any = None):
++    def __init__(self, context: Context):
+         super().__init__(context)
+-        self.config = config or {}
+-        self.enable_image_compression = read_bool_config(
+-            self.config,
+-            "enable_image_compression",
+-            DEFAULT_ENABLE_IMAGE_COMPRESSION,
+-        )
+-        self.enable_compress_retry = read_bool_config(
+-            self.config,
+-            "enable_compress_retry",
+-            DEFAULT_ENABLE_COMPRESS_RETRY,
+-        )
+-        self.recall_after_seconds = read_non_negative_int_config(
+-            self.config,
+-            "recall_after_seconds",
+-            DEFAULT_RECALL_AFTER_SECONDS,
+-        )
+-
+-        self.data_dir = get_plugin_data_dir()
++
++        self.data_dir = get_plugin_data_dir(PLUGIN_NAME)
+         self.trigger_file = self.data_dir / TRIGGER_DATA_FILENAME
+         self.temp_dir = self.data_dir / "temp"
+         self.temp_dir.mkdir(parents=True, exist_ok=True)
+ 
+-        migrate_legacy_trigger_data(
+-            [
+-                self.data_dir / LEGACY_TRIGGER_DATA_FILENAME,
+-                LEGACY_DATA_FILE,
+-            ],
+-            self.trigger_file,
+-        )
+         self.trigger_map: Dict[str, str] = load_trigger_map(self.trigger_file)
+-
+-        self.image_files = ImageFileService(self.temp_dir)
+-        self.sender = ImageMessageSender(
+-            enable_compress_retry=self.enable_compress_retry,
+-            recall_after_seconds=self.recall_after_seconds,
+-            normalize_photo_dimensions=(
+-                lambda path: self._normalize_photo_dimensions(path)
+-            ),
+-        )
++        self._compression_lock = asyncio.Lock()
+ 
+     @filter.command("添加图片触发词")
+     async def add_image_trigger(self, event: AstrMessageEvent, trigger: str, url: str):
+@@ -153,87 +111,134 @@ class DirectImageTriggerPlugin(Star):
+         if trigger_key not in self.trigger_map:
+             return
+ 
+-        image_path, cleanup_paths = await self._prepare_image_file(
+-            self.trigger_map[trigger_key]
+-        )
++        image_path = await self._download_direct_image(self.trigger_map[trigger_key])
+         if not image_path:
+             await self._safe_send_plain(event, "获取图片失败，请检查图片 URL 是否有效")
+             event.stop_event()
+             return
+ 
+-        send_result = None
++        original_path = image_path
+         try:
+-            send_result = await self._send_image_path(event, image_path)
++            async with self._compression_lock:
++                image_path = await asyncio.to_thread(
++                    self._compress_image_to_webp, image_path
++                )
+         except Exception as exc:
+-            logger.warning("发送原图失败: %s", exc)
+-            send_result = await self._retry_compressed_image(
+-                event,
+-                image_path,
+-                cleanup_paths,
+-            )
+-            if send_result is None:
+-                await self._safe_send_plain(event, "发送图片失败，请稍后重试")
+-
+-        event.stop_event()
+-        if cleanup_paths:
+-            self._schedule_cleanup(cleanup_paths)
+-        self._schedule_recall(event, send_result)
+-
+-    async def terminate(self):
+-        self.sender.cancel_pending_recalls()
+-
+-    async def _prepare_image_file(self, url: str) -> Tuple[Optional[str], List[str]]:
+-        image_path = await self._download_direct_image(url)
+-        if not image_path:
+-            return None, []
+-
+-        cleanup_paths = [image_path]
+-        if not self.enable_image_compression:
+-            return image_path, cleanup_paths
++            logger.warning("图片压缩失败: %s", type(exc).__name__)
++            await self._safe_send_plain(event, "图片压缩失败，无法将文件压缩到 4 MB 以内")
++            event.stop_event()
++            return
+ 
+-        normalized_path = self._normalize_photo_dimensions(image_path)
+-        if normalized_path != image_path:
+-            cleanup_paths.append(normalized_path)
++        try:
++            await self._send_image_path(event, image_path)
++        except Exception as exc:
++            logger.warning("发送图片失败: %s", exc)
++            await self._safe_send_plain(event, "发送图片失败，请稍后重试")
++        else:
++            self._cleanup_image_files(original_path, image_path)
+ 
+-        return normalized_path, cleanup_paths
++        event.stop_event()
+ 
+     async def _download_direct_image(self, url: str) -> Optional[str]:
+-        return await self.image_files.download_direct_image(url)
++        try:
++            async with aiohttp.ClientSession() as session:
++                async with session.get(
++                    url,
++                    allow_redirects=True,
++                    timeout=aiohttp.ClientTimeout(total=10),
++                ) as resp:
++                    if resp.status != 200:
++                        return None
++
++                    content_type = resp.headers.get("Content-Type", "").lower()
++                    if not content_type.startswith("image/"):
++                        return None
++
++                    ext = content_type_to_extension(content_type)
++                    image_path = self.temp_dir / f"{uuid.uuid4()}{ext}"
++                    data = await resp.read()
++                    with open(image_path, "wb") as f:
++                        f.write(data)
++                    return str(image_path)
++        except Exception as exc:
++            logger.error("获取图片失败: %s", exc)
++            return None
+ 
+-    def _normalize_photo_dimensions(self, image_path: str) -> str:
+-        return self.image_files.normalize_photo_dimensions(image_path)
++    def _compress_image_to_webp(self, image_path: str) -> str:
++        if Path(image_path).stat().st_size <= MAX_IMAGE_BYTES:
++            return image_path
+ 
+-    async def _send_image_path(self, event: AstrMessageEvent, image_path: str):
+-        return await self.sender.send_image_path(event, image_path)
++        frames = []
++        durations = []
++        try:
++            with PILImage.open(image_path) as image:
++                width, height = image.size
++                frame_count = (
++                    image.n_frames if getattr(image, "is_animated", False) else 1
++                )
++                if (
++                    width * height > 40_000_000
++                    or frame_count > 300
++                    or width * height * frame_count > 80_000_000
++                ):
++                    raise ValueError("图片像素或帧数超出处理限制")
++                loop = image.info.get("loop", 0)
++                for index in range(frame_count):
++                    image.seek(index)
++                    frame = ImageOps.exif_transpose(image).convert("RGBA")
++                    # WebP 单边最大为 16383 像素，超长图片先等比缩小。
++                    frame.thumbnail((16383, 16383), PILImage.Resampling.LANCZOS)
++                    frames.append(frame)
++                    durations.append(max(1, int(image.info.get("duration", 100))))
++
++            while True:
++                for quality in (85, 65, 45, 25):
++                    with io.BytesIO() as output:
++                        frames[0].save(
++                            output,
++                            format="WEBP",
++                            quality=quality,
++                            method=4,
++                            save_all=len(frames) > 1,
++                            append_images=frames[1:],
++                            duration=durations,
++                            loop=loop,
++                        )
++                        if 0 < output.tell() <= MAX_IMAGE_BYTES:
++                            target_path = self.temp_dir / f"{uuid.uuid4()}.webp"
++                            with open(target_path, "xb") as target:
++                                target.write(output.getbuffer())
++                            return str(target_path)
++
++                width, height = frames[0].size
++                if (width, height) == (1, 1):
++                    raise ValueError("压缩后的文件仍超过 4 MB")
++                size = (max(1, int(width * 0.75)), max(1, int(height * 0.75)))
++                for index, frame in enumerate(frames):
++                    frames[index] = frame.resize(size, PILImage.Resampling.LANCZOS)
++                    frame.close()
++        finally:
++            for frame in frames:
++                frame.close()
++
++    async def _send_image_path(self, event: AstrMessageEvent, image_path: str) -> None:
++        if Path(image_path).stat().st_size > MAX_IMAGE_BYTES:
++            raise ValueError("图片文件超过 4 MB，拒绝发送")
++        await event.send(MessageChain([Image.fromFileSystem(image_path)]))
++
++    def _cleanup_image_files(self, *image_paths: str) -> None:
++        for image_path in dict.fromkeys(image_paths):
++            try:
++                path = Path(image_path)
++                if path.is_symlink() or path.parent.resolve() != self.temp_dir.resolve():
++                    logger.warning("跳过非插件临时文件清理")
++                    continue
++                path.unlink(missing_ok=True)
++            except (OSError, RuntimeError, ValueError) as exc:
++                logger.warning("清理图片临时文件失败: %s", type(exc).__name__)
+ 
+     async def _safe_send_plain(self, event: AstrMessageEvent, text: str) -> None:
+-        await self.sender.safe_send_plain(event, text)
+-
+-    async def _retry_compressed_image(
+-        self,
+-        event: AstrMessageEvent,
+-        image_path: str,
+-        cleanup_paths: List[str],
+-    ):
+-        return await self.sender.retry_compressed_image(event, image_path, cleanup_paths)
+-
+-    def _schedule_cleanup(self, file_paths: List[str]):
+-        self.sender.schedule_cleanup(file_paths)
+-
+-    def _schedule_recall(self, event: AstrMessageEvent, send_result) -> None:
+-        self.sender.schedule_recall(event, send_result)
+-
+-    @staticmethod
+-    def _extract_sent_message_id(send_result) -> Optional[str]:
+-        return ImageMessageSender.extract_sent_message_id(send_result)
+-
+-    async def _try_recall_message(
+-        self,
+-        event: AstrMessageEvent,
+-        message_id: str,
+-    ) -> bool:
+-        return await self.sender.try_recall_message(event, message_id)
+-
+-    @staticmethod
+-    def _get_telegram_chat_id(event: AstrMessageEvent) -> Optional[str]:
+-        return ImageMessageSender.get_telegram_chat_id(event)
++        try:
++            await event.send(MessageChain([Plain(text)]))
++        except Exception as exc:
++            logger.error("发送文本提示失败: %s", exc)
+diff --git a/message_sender.py b/message_sender.py
+deleted file mode 100644
+index aea1a20..0000000
+--- a/message_sender.py
++++ /dev/null
+@@ -1,288 +0,0 @@
+-import asyncio
+-import base64
+-import logging
+-import os
+-from typing import Callable, List, Optional
+-
+-from astrbot.api.event import AstrMessageEvent, MessageChain
+-from astrbot.api.message_components import Image, Plain
+-
+-logger = logging.getLogger(__name__)
+-
+-
+-class ImageMessageSender:
+-    def __init__(
+-        self,
+-        enable_compress_retry: bool,
+-        recall_after_seconds: int,
+-        normalize_photo_dimensions: Callable[[str], str],
+-    ):
+-        self.enable_compress_retry = enable_compress_retry
+-        self.recall_after_seconds = recall_after_seconds
+-        self.normalize_photo_dimensions = normalize_photo_dimensions
+-        self.recall_tasks: List[asyncio.Task] = []
+-
+-    async def send_image_path(self, event: AstrMessageEvent, image_path: str):
+-        if self.recall_after_seconds > 0 and self._supports_onebot_send(event):
+-            result = await self._send_onebot_image(event, image_path)
+-            self._mark_event_sent(event)
+-            return result
+-
+-        if self.recall_after_seconds > 0 and self._supports_telegram_send(event):
+-            result = await self._send_telegram_image(event, image_path)
+-            self._mark_event_sent(event)
+-            return result
+-
+-        result = await event.send(MessageChain([Image.fromFileSystem(image_path)]))
+-        return result if result is not None else True
+-
+-    async def safe_send_plain(self, event: AstrMessageEvent, text: str) -> None:
+-        try:
+-            await event.send(MessageChain([Plain(text)]))
+-        except Exception as exc:
+-            logger.error("发送文本提示失败: %s", exc)
+-
+-    async def retry_compressed_image(
+-        self,
+-        event: AstrMessageEvent,
+-        image_path: str,
+-        cleanup_paths: List[str],
+-    ):
+-        if not self.enable_compress_retry:
+-            return None
+-
+-        retry_path = self.normalize_photo_dimensions(cleanup_paths[0])
+-        if retry_path not in cleanup_paths:
+-            cleanup_paths.append(retry_path)
+-        if retry_path == image_path:
+-            return None
+-
+-        try:
+-            return await self.send_image_path(event, retry_path)
+-        except Exception as exc:
+-            logger.error("压缩后重试发送失败: %s", exc)
+-            return None
+-
+-    def schedule_cleanup(self, file_paths: List[str]):
+-        async def delayed_cleanup():
+-            await asyncio.sleep(60)
+-            for file_path in file_paths:
+-                try:
+-                    if os.path.exists(file_path):
+-                        os.remove(file_path)
+-                except Exception as exc:
+-                    logger.error("清理临时文件失败: %s", exc)
+-
+-        asyncio.create_task(delayed_cleanup())
+-
+-    def schedule_recall(self, event: AstrMessageEvent, send_result) -> None:
+-        if self.recall_after_seconds <= 0:
+-            return
+-        message_id = self.extract_sent_message_id(send_result)
+-        if not message_id:
+-            logger.warning("无法撤回图片：平台未返回已发送消息 ID")
+-            return
+-
+-        async def delayed_recall():
+-            await asyncio.sleep(self.recall_after_seconds)
+-            await self.try_recall_message(event, message_id)
+-
+-        task = asyncio.create_task(delayed_recall())
+-        task.add_done_callback(self._remove_recall_task)
+-        self.recall_tasks.append(task)
+-
+-    def cancel_pending_recalls(self) -> None:
+-        for task in list(self.recall_tasks):
+-            task.cancel()
+-        self.recall_tasks.clear()
+-
+-    @staticmethod
+-    def extract_sent_message_id(send_result) -> Optional[str]:
+-        if send_result is None:
+-            return None
+-        if isinstance(send_result, bool):
+-            return None
+-        if isinstance(send_result, dict):
+-            value = ImageMessageSender._extract_message_id_from_dict(send_result)
+-            if value:
+-                return value
+-        for attr in ("message_id", "msg_id", "id"):
+-            value = getattr(send_result, attr, None)
+-            if value:
+-                return str(value)
+-        return None
+-
+-    async def try_recall_message(
+-        self,
+-        event: AstrMessageEvent,
+-        message_id: str,
+-    ) -> bool:
+-        for method_name in ("recall_message", "revoke_message", "delete_message"):
+-            method = getattr(event, method_name, None)
+-            if callable(method):
+-                try:
+-                    await method(message_id)
+-                    return True
+-                except TypeError:
+-                    try:
+-                        await method()
+-                        return True
+-                    except Exception:
+-                        continue
+-                except Exception as exc:
+-                    logger.warning("撤回消息失败: %s", exc)
+-                    return False
+-
+-        bot = getattr(event, "bot", None)
+-        delete_msg = getattr(bot, "delete_msg", None)
+-        if callable(delete_msg):
+-            try:
+-                await delete_msg(message_id=int(message_id))
+-                return True
+-            except Exception as exc:
+-                logger.warning("OneBot 撤回消息失败: %s", exc)
+-                return False
+-
+-        client = getattr(event, "client", None)
+-        delete_message = getattr(client, "delete_message", None)
+-        if callable(delete_message):
+-            chat_id = self.get_telegram_chat_id(event)
+-            if chat_id:
+-                try:
+-                    await delete_message(chat_id=chat_id, message_id=int(message_id))
+-                    return True
+-                except Exception as exc:
+-                    logger.warning("Telegram 撤回消息失败: %s", exc)
+-                    return False
+-
+-        logger.warning("当前平台不支持插件侧撤回消息")
+-        return False
+-
+-    async def _send_onebot_image(self, event: AstrMessageEvent, image_path: str):
+-        bot = getattr(event, "bot", None)
+-        message = [self._onebot_image_segment(image_path)]
+-        group_id = self._integer_id(self._call_event_method(event, "get_group_id"))
+-        if group_id is not None:
+-            return await bot.send_group_msg(group_id=group_id, message=message)
+-
+-        user_id = self._integer_id(self._call_event_method(event, "get_sender_id"))
+-        if user_id is not None:
+-            return await bot.send_private_msg(user_id=user_id, message=message)
+-
+-        raw_event = getattr(getattr(event, "message_obj", None), "raw_message", None)
+-        send = getattr(bot, "send", None)
+-        if callable(send) and raw_event is not None:
+-            return await send(event=raw_event, message=message)
+-
+-        raise ValueError("无法通过 OneBot 发送图片：缺少有效群号或用户 ID")
+-
+-    async def _send_telegram_image(self, event: AstrMessageEvent, image_path: str):
+-        client = getattr(event, "client", None)
+-        payload = self._telegram_payload(event)
+-        if self._is_gif(image_path) and hasattr(client, "send_animation"):
+-            return await client.send_animation(animation=image_path, **payload)
+-        return await client.send_photo(photo=image_path, **payload)
+-
+-    @staticmethod
+-    def _onebot_image_segment(image_path: str) -> dict:
+-        with open(image_path, "rb") as image_file:
+-            encoded = base64.b64encode(image_file.read()).decode("utf-8")
+-        return {"type": "image", "data": {"file": f"base64://{encoded}"}}
+-
+-    @staticmethod
+-    def _extract_message_id_from_dict(send_result: dict) -> Optional[str]:
+-        for key in ("message_id", "msg_id", "id"):
+-            value = send_result.get(key)
+-            if value:
+-                return str(value)
+-
+-        data = send_result.get("data")
+-        if isinstance(data, dict):
+-            for key in ("message_id", "msg_id", "id"):
+-                value = data.get(key)
+-                if value:
+-                    return str(value)
+-        return None
+-
+-    @staticmethod
+-    def _supports_onebot_send(event: AstrMessageEvent) -> bool:
+-        bot = getattr(event, "bot", None)
+-        return bool(
+-            bot
+-            and (
+-                callable(getattr(bot, "send_group_msg", None))
+-                or callable(getattr(bot, "send_private_msg", None))
+-            )
+-        )
+-
+-    @staticmethod
+-    def _supports_telegram_send(event: AstrMessageEvent) -> bool:
+-        client = getattr(event, "client", None)
+-        return bool(client and callable(getattr(client, "send_photo", None)))
+-
+-    @staticmethod
+-    def _call_event_method(event: AstrMessageEvent, method_name: str):
+-        method = getattr(event, method_name, None)
+-        if callable(method):
+-            return method()
+-        return None
+-
+-    @staticmethod
+-    def _integer_id(value) -> Optional[int]:
+-        if value is None:
+-            return None
+-        clean_value = str(value).split("#", 1)[0]
+-        if not clean_value.isdigit():
+-            return None
+-        return int(clean_value)
+-
+-    @staticmethod
+-    def _telegram_payload(event: AstrMessageEvent) -> dict:
+-        message_obj = getattr(event, "message_obj", None)
+-        chat_id = getattr(message_obj, "group_id", None)
+-        message_thread_id = None
+-        if chat_id:
+-            chat_id = str(chat_id)
+-            if "#" in chat_id:
+-                chat_id, message_thread_id = chat_id.split("#", 1)
+-        else:
+-            chat_id = ImageMessageSender._call_event_method(event, "get_sender_id")
+-
+-        payload = {"chat_id": chat_id}
+-        if message_thread_id:
+-            payload["message_thread_id"] = message_thread_id
+-        return payload
+-
+-    @staticmethod
+-    def get_telegram_chat_id(event: AstrMessageEvent) -> Optional[str]:
+-        message_obj = getattr(event, "message_obj", None)
+-        group_id = getattr(message_obj, "group_id", None)
+-        if group_id:
+-            return str(group_id).split("#", 1)[0]
+-        sender_id = getattr(event, "get_sender_id", None)
+-        if callable(sender_id):
+-            return str(sender_id())
+-        return getattr(message_obj, "session_id", None)
+-
+-    @staticmethod
+-    def _is_gif(path: str) -> bool:
+-        if path.lower().endswith(".gif"):
+-            return True
+-        try:
+-            with open(path, "rb") as f:
+-                return f.read(6) in (b"GIF87a", b"GIF89a")
+-        except OSError:
+-            return False
+-
+-    @staticmethod
+-    def _mark_event_sent(event: AstrMessageEvent) -> None:
+-        try:
+-            setattr(event, "_has_send_oper", True)
+-        except Exception:
+-            pass
+-
+-    def _remove_recall_task(self, task: asyncio.Task) -> None:
+-        try:
+-            self.recall_tasks.remove(task)
+-        except ValueError:
+-            pass
+diff --git a/metadata.yaml b/metadata.yaml
+index 9e83faf..7d251a7 100644
+--- a/metadata.yaml
++++ b/metadata.yaml
+@@ -1,6 +1,10 @@
+ name: astrbot_plugin_img # 插件唯一识别名，以 astrbot_plugin_ 前缀开头
+ display_name: 自定义图片插件 # 用于展示的名字，可以是方便人类阅读的名字（需要版本 >= v4.5.0，低版本不会报错，请放心填写）
+ desc: 极简图片触发词插件，支持为触发词绑定直接图片URL。 # 插件简短描述
+-version: v1.3.2 # 插件版本号。格式：v1.1.1 或者 v1.1
++version: v2.1.2 # 插件版本号。格式：v1.1.1 或者 v1.1
+ author: djwlx # 作者
+ repo: https://github.com/djwlx/astrbot_plugin_img # 插件的仓库地址
++support_platforms:
++  - qq_official
++  - weixin_oc
++  - kook
+diff --git a/requirements.txt b/requirements.txt
+index 807afc2..c26f1ef 100644
+--- a/requirements.txt
++++ b/requirements.txt
+@@ -1,2 +1,2 @@
+ aiohttp>=3.8.0
+-Pillow>=11.2.1
++Pillow==12.3.0
+diff --git a/settings.py b/settings.py
+deleted file mode 100644
+index f6945f6..0000000
+--- a/settings.py
++++ /dev/null
+@@ -1,34 +0,0 @@
+-from pathlib import Path
+-from typing import Any
+-
+-PLUGIN_NAME = "astrbot_plugin_img"
+-PLUGIN_VERSION = "v1.3.2"
+-
+-LEGACY_DATA_FILE = Path(__file__).parent / "config.json"
+-LEGACY_TRIGGER_DATA_FILENAME = "config.json"
+-TRIGGER_DATA_FILENAME = "triggers.json"
+-
+-DEFAULT_ENABLE_IMAGE_COMPRESSION = True
+-DEFAULT_ENABLE_COMPRESS_RETRY = True
+-DEFAULT_RECALL_AFTER_SECONDS = 0
+-
+-
+-def read_bool_config(config: Any, key: str, default: bool) -> bool:
+-    if not hasattr(config, "get"):
+-        return default
+-    value = config.get(key, default)
+-    if isinstance(value, bool):
+-        return value
+-    return default
+-
+-
+-def read_non_negative_int_config(config: Any, key: str, default: int) -> int:
+-    if not hasattr(config, "get"):
+-        return default
+-    value = config.get(key, default)
+-    if isinstance(value, bool):
+-        return default
+-    try:
+-        return max(0, int(value))
+-    except (TypeError, ValueError):
+-        return default
+diff --git a/skills-lock.json b/skills-lock.json
+index 21b3ae3..3e6cc61 100644
+--- a/skills-lock.json
++++ b/skills-lock.json
+@@ -5,7 +5,7 @@
+       "source": "xunxiing/AstrBot-Skill",
+       "sourceType": "github",
+       "skillPath": "skill-astrbot-dev/SKILL.md",
+-      "computedHash": "82fe3296a79ef2e13e734e6c8e2f3b83624cfb7bd6994054fa9d9780d7e5b9bb"
++      "computedHash": "eb7fe0bc2871bd37e5ce4a726043ebacedcc16672fcc48d32c996836151a5ac8"
+     }
+   }
+ }
+diff --git a/tests/test_direct_image_plugin.py b/tests/test_direct_image_plugin.py
+index 01d4232..9d742ca 100644
+--- a/tests/test_direct_image_plugin.py
++++ b/tests/test_direct_image_plugin.py
+@@ -1,13 +1,18 @@
+ import asyncio
+ import importlib
+ import importlib.util
++import io
+ import json
+ import os
++import random
+ import sys
+ import types
+ import unittest
+ from pathlib import Path
+ from tempfile import TemporaryDirectory
++from unittest.mock import patch
++
++from PIL import Image as PILImage
+ 
+ 
+ async def collect_async(async_iterable):
+@@ -48,67 +53,6 @@ class ChainEvent:
+         return None
+ 
+ 
+-class OneBot:
+-    def __init__(self):
+-        self.group_messages = []
+-        self.private_messages = []
+-        self.deleted_messages = []
+-
+-    async def send_group_msg(self, **kwargs):
+-        self.group_messages.append(kwargs)
+-        return {"message_id": 321}
+-
+-    async def send_private_msg(self, **kwargs):
+-        self.private_messages.append(kwargs)
+-        return {"message_id": 654}
+-
+-    async def delete_msg(self, **kwargs):
+-        self.deleted_messages.append(kwargs)
+-
+-
+-class OneBotEvent(ChainEvent):
+-    def __init__(self, message_str, group_id="10001", sender_id="20002"):
+-        super().__init__(message_str)
+-        self.bot = OneBot()
+-        self._group_id = group_id
+-        self._sender_id = sender_id
+-
+-    def get_group_id(self):
+-        return self._group_id
+-
+-    def get_sender_id(self):
+-        return self._sender_id
+-
+-    async def send(self, _message):
+-        raise AssertionError("OneBot recallable sends should use bot APIs directly")
+-
+-
+-class TelegramClient:
+-    def __init__(self):
+-        self.photos = []
+-        self.deleted_messages = []
+-
+-    async def send_photo(self, **kwargs):
+-        self.photos.append(kwargs)
+-        return types.SimpleNamespace(message_id=777)
+-
+-    async def delete_message(self, **kwargs):
+-        self.deleted_messages.append(kwargs)
+-
+-
+-class TelegramEvent(ChainEvent):
+-    def __init__(self, message_str, group_id="12345#678"):
+-        super().__init__(message_str)
+-        self.client = TelegramClient()
+-        self.message_obj = types.SimpleNamespace(group_id=group_id, session_id="999")
+-
+-    def get_sender_id(self):
+-        return "999"
+-
+-    async def send(self, _message):
+-        raise AssertionError("Telegram recallable sends should use client APIs directly")
+-
+-
+ def install_astrbot_stubs():
+     astrbot = types.ModuleType("astrbot")
+     astrbot_api = types.ModuleType("astrbot.api")
+@@ -210,10 +154,7 @@ class DirectImageConfigTests(unittest.TestCase):
+         install_astrbot_stubs()
+         for module_name in (
+             "main",
+-            "settings",
+             "trigger_store",
+-            "image_files",
+-            "message_sender",
+         ):
+             sys.modules.pop(module_name, None)
+         self.main = importlib.import_module("main")
+@@ -230,7 +171,7 @@ class DirectImageConfigTests(unittest.TestCase):
+ 
+     def test_load_trigger_map_reads_only_string_url_entries(self):
+         with TemporaryDirectory() as temp_dir:
+-            config_path = Path(temp_dir) / "config.json"
++            config_path = Path(temp_dir) / "triggers.json"
+             config_path.write_text(
+                 json.dumps(
+                     {
+@@ -253,7 +194,7 @@ class DirectImageConfigTests(unittest.TestCase):
+ 
+     def test_save_trigger_map_writes_minimal_config_shape(self):
+         with TemporaryDirectory() as temp_dir:
+-            config_path = Path(temp_dir) / "config.json"
++            config_path = Path(temp_dir) / "triggers.json"
+ 
+             self.main.save_trigger_map(
+                 {"cat": "https://example.com/cat.jpg"}, config_path
+@@ -263,10 +204,11 @@ class DirectImageConfigTests(unittest.TestCase):
+ 
+         self.assertEqual(result, {"trigger_map": {"cat": "https://example.com/cat.jpg"}})
+ 
+-    def test_migrate_legacy_trigger_data_copies_old_plugin_root_config(self):
++    def test_plugin_starts_empty_when_only_legacy_config_exists(self):
+         with TemporaryDirectory() as temp_dir:
+-            legacy_path = Path(temp_dir) / "legacy_config.json"
+-            trigger_path = Path(temp_dir) / "plugin_data" / "triggers.json"
++            data_dir = Path(temp_dir) / "astrbot_plugin_img"
++            data_dir.mkdir()
++            legacy_path = data_dir / "config.json"
+             legacy_path.write_text(
+                 json.dumps(
+                     {"trigger_map": {"Cat": "https://example.com/cat.jpg"}},
+@@ -275,15 +217,12 @@ class DirectImageConfigTests(unittest.TestCase):
+                 encoding="utf-8",
+             )
+ 
+-            migrated = self.main.migrate_legacy_trigger_data(
+-                [legacy_path],
+-                trigger_path,
+-            )
+-
+-            result = json.loads(trigger_path.read_text(encoding="utf-8"))
++            with patch.dict(os.environ, {"ASTRBOT_PLUGIN_TEST_DATA_DIR": temp_dir}):
++                plugin = self.main.DirectImageTriggerPlugin(object())
+ 
+-        self.assertTrue(migrated)
+-        self.assertEqual(result, {"trigger_map": {"cat": "https://example.com/cat.jpg"}})
++            self.assertEqual(plugin.trigger_map, {})
++            self.assertFalse(plugin.trigger_file.exists())
++            self.assertTrue(legacy_path.exists())
+ 
+     def test_plugin_uses_astrbot_plugin_data_directory_for_runtime_files(self):
+         with TemporaryDirectory() as temp_dir:
+@@ -302,170 +241,309 @@ class DirectImageConfigTests(unittest.TestCase):
+                 Path(temp_dir) / "astrbot_plugin_img" / "temp",
+             )
+ 
+-    def test_plugin_reads_runtime_options_from_astrbot_config(self):
+-        plugin = self.main.DirectImageTriggerPlugin(
+-            object(),
+-            config={
+-                "enable_image_compression": False,
+-                "enable_compress_retry": False,
+-                "recall_after_seconds": 8,
+-            },
+-        )
+-
+-        self.assertFalse(plugin.enable_image_compression)
+-        self.assertFalse(plugin.enable_compress_retry)
+-        self.assertEqual(plugin.recall_after_seconds, 8)
++    def test_list_image_triggers_returns_sorted_trigger_words_without_urls(self):
++        plugin = self.main.DirectImageTriggerPlugin(object())
++        plugin.trigger_map = {
++            "dog": "https://example.com/dog.jpg",
++            "cat": "https://example.com/cat.jpg",
++        }
+ 
+-    def test_schedule_recall_skips_when_recall_delay_is_zero(self):
+-        plugin = self.main.DirectImageTriggerPlugin(
+-            object(), config={"recall_after_seconds": 0}
+-        )
+-        event = ChainEvent("cat")
++        results = asyncio.run(collect_async(plugin.list_image_triggers(PlainEvent())))
+ 
+-        async def fail_recall(_event, _message_id):
+-            raise AssertionError("recall should be disabled")
++        self.assertEqual(results, ["图片触发词列表:\ncat\ndog"])
+ 
+-        plugin._try_recall_message = fail_recall
++    def test_list_image_triggers_handles_empty_map(self):
++        plugin = self.main.DirectImageTriggerPlugin(object())
++        plugin.trigger_map = {}
+ 
+-        plugin._schedule_recall(event, {"message_id": "123"})
++        results = asyncio.run(collect_async(plugin.list_image_triggers(PlainEvent())))
+ 
+-    def test_extract_sent_message_id_supports_common_result_shapes(self):
+-        class SendResult:
+-            message_id = 456
++        self.assertEqual(results, ["暂无图片触发词"])
+ 
++    def test_on_message_sends_downloaded_original_image(self):
+         plugin = self.main.DirectImageTriggerPlugin(object())
++        plugin.trigger_map = {"cat": "https://example.com/cat.jpg"}
++        event = ChainEvent("  Cat  ")
+ 
+-        self.assertEqual(plugin._extract_sent_message_id({"msg_id": "123"}), "123")
+-        self.assertEqual(plugin._extract_sent_message_id(SendResult()), "456")
+-        self.assertIsNone(plugin._extract_sent_message_id(True))
++        with TemporaryDirectory() as temp_dir:
++            plugin.temp_dir = Path(temp_dir)
++            image_path = Path(temp_dir) / "original.jpg"
++            image_path.write_bytes(b"original-image-bytes")
++            unrelated_path = Path(temp_dir) / "previous-failure.jpg"
++            unrelated_path.write_bytes(b"keep-this-file")
+ 
+-    def test_send_image_path_uses_onebot_api_when_recall_is_enabled(self):
+-        plugin = self.main.DirectImageTriggerPlugin(
+-            object(), config={"recall_after_seconds": 5}
+-        )
+-        event = OneBotEvent("cat")
++            original_send = event.send
+ 
+-        with TemporaryDirectory() as temp_dir:
+-            image_path = Path(temp_dir) / "cat.jpg"
+-            image_path.write_bytes(b"image-bytes")
++            async def checked_send(message):
++                self.assertEqual(image_path.read_bytes(), b"original-image-bytes")
++                await original_send(message)
+ 
+-            send_result = asyncio.run(plugin._send_image_path(event, str(image_path)))
++            event.send = checked_send
+ 
+-        self.assertEqual(send_result, {"message_id": 321})
+-        self.assertEqual(event.bot.group_messages[0]["group_id"], 10001)
+-        image_segment = event.bot.group_messages[0]["message"][0]
+-        self.assertEqual(image_segment["type"], "image")
+-        self.assertTrue(image_segment["data"]["file"].startswith("base64://"))
++            async def fake_download(url):
++                self.assertEqual(url, "https://example.com/cat.jpg")
++                return str(image_path)
+ 
+-    def test_send_image_path_uses_telegram_client_when_recall_is_enabled(self):
+-        plugin = self.main.DirectImageTriggerPlugin(
+-            object(), config={"recall_after_seconds": 5}
+-        )
+-        event = TelegramEvent("cat")
++            plugin._download_direct_image = fake_download
++            asyncio.run(plugin.on_message(event))
+ 
+-        with TemporaryDirectory() as temp_dir:
+-            image_path = Path(temp_dir) / "cat.jpg"
+-            image_path.write_bytes(b"image-bytes")
++            self.assertEqual(len(event.sent_messages), 1)
++            self.assertEqual(event.sent_messages[0].chain[0].path, str(image_path))
++            self.assertFalse(image_path.exists())
++            self.assertEqual(unrelated_path.read_bytes(), b"keep-this-file")
++        self.assertTrue(event.stopped)
++
++    def test_on_message_reports_download_failure(self):
++        plugin = self.main.DirectImageTriggerPlugin(object())
++        plugin.trigger_map = {"cat": "https://example.com/cat.jpg"}
++        event = ChainEvent("cat")
+ 
+-            send_result = asyncio.run(plugin._send_image_path(event, str(image_path)))
++        async def fake_download(_url):
++            return None
+ 
+-        self.assertEqual(send_result.message_id, 777)
++        plugin._download_direct_image = fake_download
++        asyncio.run(plugin.on_message(event))
++
++        self.assertEqual(len(event.sent_messages), 1)
+         self.assertEqual(
+-            event.client.photos,
+-            [
+-                {
+-                    "photo": str(image_path),
+-                    "chat_id": "12345",
+-                    "message_thread_id": "678",
+-                }
+-            ],
++            event.sent_messages[0].chain[0].text,
++            "获取图片失败，请检查图片 URL 是否有效",
+         )
++        self.assertTrue(event.stopped)
+ 
+-    def test_try_recall_message_uses_onebot_delete_msg(self):
++    def test_on_message_reports_send_failure(self):
+         plugin = self.main.DirectImageTriggerPlugin(object())
+-        event = OneBotEvent("cat")
++        plugin.trigger_map = {"cat": "https://example.com/cat.jpg"}
++        event = ChainEvent("cat")
++        event.send_errors.append(RuntimeError("send failed"))
+ 
+-        result = asyncio.run(plugin._try_recall_message(event, "321"))
++        with TemporaryDirectory() as temp_dir:
++            plugin.temp_dir = Path(temp_dir)
++            image_path = Path(temp_dir) / "original.jpg"
++            image_path.write_bytes(b"original-image-bytes")
+ 
+-        self.assertTrue(result)
+-        self.assertEqual(event.bot.deleted_messages, [{"message_id": 321}])
++            async def fake_download(_url):
++                return str(image_path)
+ 
+-    def test_safe_photo_canvas_size_handles_telegram_photo_limits(self):
+-        normal = self.main.safe_photo_canvas_size(1200, 800)
+-        wide = self.main.safe_photo_canvas_size(4000, 100)
+-        large = self.main.safe_photo_canvas_size(8000, 4000)
++            plugin._download_direct_image = fake_download
++            asyncio.run(plugin.on_message(event))
+ 
+-        self.assertEqual(normal, (1200, 800))
+-        self.assertLessEqual(max(wide) / min(wide), 20)
+-        self.assertLessEqual(sum(large), 9900)
++            self.assertEqual(len(event.sent_messages), 2)
++            self.assertEqual(event.sent_messages[0].chain[0].path, str(image_path))
++            self.assertEqual(image_path.read_bytes(), b"original-image-bytes")
++        self.assertEqual(
++            event.sent_messages[1].chain[0].text,
++            "发送图片失败，请稍后重试",
++        )
++        self.assertTrue(event.stopped)
+ 
+-    def test_list_image_triggers_returns_sorted_trigger_words_without_urls(self):
++    def test_image_at_size_limit_is_kept_unchanged(self):
+         plugin = self.main.DirectImageTriggerPlugin(object())
+-        plugin.trigger_map = {
+-            "dog": "https://example.com/dog.jpg",
+-            "cat": "https://example.com/cat.jpg",
+-        }
++        with TemporaryDirectory() as temp_dir:
++            image_path = Path(temp_dir) / "original.png"
++            with PILImage.new("RGB", (8, 8), "red") as image:
++                image.save(image_path)
++            with image_path.open("ab") as image_file:
++                image_file.truncate(self.main.MAX_IMAGE_BYTES)
+ 
+-        results = asyncio.run(collect_async(plugin.list_image_triggers(PlainEvent())))
++            result = plugin._compress_image_to_webp(str(image_path))
+ 
+-        self.assertEqual(results, ["图片触发词列表:\ncat\ndog"])
++            self.assertEqual(result, str(image_path))
++            self.assertEqual(image_path.stat().st_size, 4_000_000)
+ 
+-    def test_list_image_triggers_handles_empty_map(self):
++    def test_large_transparent_image_is_sent_as_webp_under_four_mb(self):
+         plugin = self.main.DirectImageTriggerPlugin(object())
+-        plugin.trigger_map = {}
+-
+-        results = asyncio.run(collect_async(plugin.list_image_triggers(PlainEvent())))
++        plugin.trigger_map = {"cat": "https://example.com/cat.png"}
++        event = ChainEvent("cat")
++        sent_data = []
++        original_send = event.send
+ 
+-        self.assertEqual(results, ["暂无图片触发词"])
++        async def capture_send(message):
++            sent_data.append(Path(message.chain[0].path).read_bytes())
++            await original_send(message)
+ 
+-    def test_prepare_image_file_skips_compression_when_disabled(self):
+-        plugin = self.main.DirectImageTriggerPlugin(
+-            object(), config={"enable_image_compression": False}
+-        )
++        event.send = capture_send
++        with TemporaryDirectory() as temp_dir:
++            plugin.temp_dir = Path(temp_dir)
++            source_path = plugin.temp_dir / "original.png"
++            pixels = random.Random(7).randbytes(1200 * 1000 * 3)
++            with PILImage.frombytes("RGB", (1200, 1000), pixels) as image:
++                image.putalpha(128)
++                image.save(source_path, compress_level=0)
++            self.assertGreater(source_path.stat().st_size, 4_000_000)
++
++            async def fake_download(_url):
++                return str(source_path)
++
++            plugin._download_direct_image = fake_download
++            asyncio.run(plugin.on_message(event))
++
++            self.assertEqual(len(event.sent_messages), 1)
++            sent_path = Path(event.sent_messages[0].chain[0].path)
++            self.assertEqual(sent_path.suffix, ".webp")
++            self.assertLessEqual(len(sent_data[0]), 4_000_000)
++            with PILImage.open(io.BytesIO(sent_data[0])) as image:
++                self.assertEqual(image.format, "WEBP")
++                self.assertEqual(image.size, (1200, 1000))
++                self.assertEqual(image.getchannel("A").getextrema(), (128, 128))
++            self.assertFalse(source_path.exists())
++            self.assertFalse(sent_path.exists())
++        self.assertTrue(event.stopped)
+ 
+-        async def fake_download(_url):
+-            return "/tmp/original.jpg"
++    def test_oversized_webp_is_resized_when_quality_reduction_is_insufficient(self):
++        plugin = self.main.DirectImageTriggerPlugin(object())
++        with TemporaryDirectory() as temp_dir:
++            plugin.temp_dir = Path(temp_dir)
++            source_path = plugin.temp_dir / "original.webp"
++            pixels = random.Random(8).randbytes(160 * 120 * 3)
++            with PILImage.frombytes("RGB", (160, 120), pixels) as image:
++                image.save(source_path, lossless=True)
++
++            with patch.object(self.main, "MAX_IMAGE_BYTES", 1000):
++                result = plugin._compress_image_to_webp(str(source_path))
++
++            self.assertNotEqual(result, str(source_path))
++            self.assertLessEqual(Path(result).stat().st_size, 1000)
++            with PILImage.open(result) as image:
++                self.assertLess(image.width, 160)
++                self.assertLess(image.height, 120)
++
++    def test_gif_compression_preserves_animation_timing_and_loop(self):
++        plugin = self.main.DirectImageTriggerPlugin(object())
++        with TemporaryDirectory() as temp_dir:
++            plugin.temp_dir = Path(temp_dir)
++            source_path = plugin.temp_dir / "original.gif"
++            frames = [
++                PILImage.new("RGB", (64, 64), color)
++                for color in ("red", "green", "blue")
++            ]
++            try:
++                frames[0].save(
++                    source_path,
++                    save_all=True,
++                    append_images=frames[1:],
++                    duration=[80, 120, 160],
++                    loop=2,
++                )
++            finally:
++                for frame in frames:
++                    frame.close()
++            with source_path.open("ab") as image_file:
++                image_file.truncate(1001)
++
++            with patch.object(self.main, "MAX_IMAGE_BYTES", 1000):
++                result = plugin._compress_image_to_webp(str(source_path))
++
++            self.assertLessEqual(Path(result).stat().st_size, 1000)
++            with PILImage.open(result) as image:
++                self.assertEqual(image.format, "WEBP")
++                self.assertEqual(image.n_frames, 3)
++                self.assertEqual(image.info["loop"], 2)
++                durations = []
++                for index in range(image.n_frames):
++                    image.seek(index)
++                    image.load()
++                    durations.append(image.info["duration"])
++                self.assertEqual(durations, [80, 120, 160])
++
++    def test_compression_failure_does_not_send_oversized_original(self):
++        plugin = self.main.DirectImageTriggerPlugin(object())
++        plugin.trigger_map = {"cat": "https://example.com/cat.png"}
++        event = ChainEvent("cat")
++        with TemporaryDirectory() as temp_dir:
++            plugin.temp_dir = Path(temp_dir)
++            source_path = Path(temp_dir) / "invalid.png"
++            with source_path.open("wb") as image_file:
++                image_file.truncate(self.main.MAX_IMAGE_BYTES + 1)
+ 
+-        def fail_normalize(_path):
+-            raise AssertionError("compression should be disabled")
++            async def fake_download(_url):
++                return str(source_path)
+ 
+-        plugin._download_direct_image = fake_download
+-        plugin._normalize_photo_dimensions = fail_normalize
++            plugin._download_direct_image = fake_download
++            asyncio.run(plugin.on_message(event))
+ 
+-        image_path, cleanup_paths = asyncio.run(
+-            plugin._prepare_image_file("https://example.com/cat.jpg")
+-        )
++            self.assertEqual(len(event.sent_messages), 1)
++            self.assertIn("图片压缩失败", event.sent_messages[0].chain[0].text)
++            self.assertTrue(source_path.exists())
++        self.assertTrue(event.stopped)
+ 
+-        self.assertEqual(image_path, "/tmp/original.jpg")
+-        self.assertEqual(cleanup_paths, ["/tmp/original.jpg"])
++    def test_failed_send_preserves_original_and_compressed_image(self):
++        plugin = self.main.DirectImageTriggerPlugin(object())
++        plugin.trigger_map = {"cat": "https://example.com/cat.png"}
++        event = ChainEvent("cat")
++        event.send_errors.append(RuntimeError("send failed"))
++        with TemporaryDirectory() as temp_dir:
++            plugin.temp_dir = Path(temp_dir)
++            source_path = plugin.temp_dir / "original.png"
++            pixels = random.Random(9).randbytes(160 * 120 * 3)
++            with PILImage.frombytes("RGB", (160, 120), pixels) as image:
++                image.save(source_path)
++
++            async def fake_download(_url):
++                return str(source_path)
++
++            plugin._download_direct_image = fake_download
++            with patch.object(self.main, "MAX_IMAGE_BYTES", 1000):
++                asyncio.run(plugin.on_message(event))
++
++            sent_path = Path(event.sent_messages[0].chain[0].path)
++            self.assertEqual(sent_path.suffix, ".webp")
++            self.assertTrue(source_path.exists())
++            self.assertTrue(sent_path.exists())
++            self.assertEqual(len(event.sent_messages), 2)
++        self.assertTrue(event.stopped)
+ 
+-    def test_on_message_retries_with_compressed_image_after_send_failure(self):
+-        plugin = self.main.DirectImageTriggerPlugin(
+-            object(),
+-            config={
+-                "enable_image_compression": False,
+-                "enable_compress_retry": True,
+-            },
+-        )
++    def test_cleanup_failure_does_not_report_send_failure(self):
++        plugin = self.main.DirectImageTriggerPlugin(object())
+         plugin.trigger_map = {"cat": "https://example.com/cat.jpg"}
+-        cleanup_paths = []
++        event = ChainEvent("cat")
++        with TemporaryDirectory() as temp_dir:
++            plugin.temp_dir = Path(temp_dir)
++            source_path = plugin.temp_dir / "original.jpg"
++            source_path.write_bytes(b"original-image-bytes")
++
++            async def fake_download(_url):
++                return str(source_path)
++
++            plugin._download_direct_image = fake_download
++            with (
++                patch.object(Path, "unlink", side_effect=PermissionError),
++                self.assertLogs(self.main.logger, level="WARNING") as logs,
++            ):
++                asyncio.run(plugin.on_message(event))
++
++            self.assertEqual(len(event.sent_messages), 1)
++            self.assertTrue(source_path.exists())
++            self.assertIn("清理图片临时文件失败", logs.output[0])
++        self.assertTrue(event.stopped)
++
++    def test_cleanup_skips_files_outside_temp_directory_and_symlinks(self):
++        plugin = self.main.DirectImageTriggerPlugin(object())
++        with TemporaryDirectory() as temp_dir, TemporaryDirectory() as outside_dir:
++            plugin.temp_dir = Path(temp_dir)
++            outside_path = Path(outside_dir) / "keep.jpg"
++            outside_path.write_bytes(b"keep-this-file")
++            symlink_path = plugin.temp_dir / "link.jpg"
++            symlink_path.symlink_to(outside_path)
+ 
+-        async def fake_download(url):
+-            self.assertEqual(url, "https://example.com/cat.jpg")
+-            return "/tmp/original.jpg"
++            with self.assertLogs(self.main.logger, level="WARNING"):
++                plugin._cleanup_image_files(str(outside_path), str(symlink_path))
+ 
+-        plugin._download_direct_image = fake_download
+-        plugin._normalize_photo_dimensions = lambda path: "/tmp/compressed.jpg"
+-        plugin._schedule_cleanup = cleanup_paths.extend
++            self.assertEqual(outside_path.read_bytes(), b"keep-this-file")
++            self.assertTrue(symlink_path.is_symlink())
++
++    def test_send_rejects_oversized_file_even_if_compression_was_bypassed(self):
++        plugin = self.main.DirectImageTriggerPlugin(object())
+         event = ChainEvent("cat")
+-        event.send_errors.append(RuntimeError("send failed"))
++        with TemporaryDirectory() as temp_dir:
++            image_path = Path(temp_dir) / "oversized.webp"
++            with image_path.open("wb") as image_file:
++                image_file.truncate(self.main.MAX_IMAGE_BYTES + 1)
+ 
+-        asyncio.run(plugin.on_message(event))
++            with self.assertRaises(ValueError):
++                asyncio.run(plugin._send_image_path(event, str(image_path)))
+ 
+-        sent_paths = [message.chain[0].path for message in event.sent_messages]
+-        self.assertEqual(sent_paths, ["/tmp/original.jpg", "/tmp/compressed.jpg"])
+-        self.assertTrue(event.stopped)
+-        self.assertEqual(cleanup_paths, ["/tmp/original.jpg", "/tmp/compressed.jpg"])
++        self.assertEqual(event.sent_messages, [])
+ 
+     def test_on_message_ignores_non_text_message_str(self):
+         plugin = self.main.DirectImageTriggerPlugin(object())
+@@ -477,24 +555,6 @@ class DirectImageConfigTests(unittest.TestCase):
+         self.assertFalse(event.stopped)
+         self.assertEqual(event.sent_messages, [])
+ 
+-    def test_supports_onebot_send_when_only_one_method_exists(self):
+-        class PartialOneBot:
+-            async def send_group_msg(self, **kwargs):
+-                return kwargs
+-
+-        event = ChainEvent("cat")
+-        event.bot = PartialOneBot()
+-
+-        self.assertTrue(self.main.ImageMessageSender._supports_onebot_send(event))
+-
+-    def test_conf_schema_defines_runtime_options(self):
+-        schema_path = Path(__file__).resolve().parents[1] / "_conf_schema.json"
+-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+-
+-        self.assertIn("enable_image_compression", schema)
+-        self.assertIn("enable_compress_retry", schema)
+-        self.assertIn("recall_after_seconds", schema)
+-
+     def test_changelog_contains_metadata_version(self):
+         repo_root = Path(__file__).resolve().parents[1]
+         metadata = (repo_root / "metadata.yaml").read_text(encoding="utf-8")
+@@ -516,15 +576,9 @@ class DirectImageConfigTests(unittest.TestCase):
+         ]
+         module_names = package_names + [
+             "main",
+-            "settings",
+             "trigger_store",
+-            "image_files",
+-            "message_sender",
+             "data.plugins.astrbot_plugin_img.main",
+-            "data.plugins.astrbot_plugin_img.settings",
+             "data.plugins.astrbot_plugin_img.trigger_store",
+-            "data.plugins.astrbot_plugin_img.image_files",
+-            "data.plugins.astrbot_plugin_img.message_sender",
+         ]
+         old_modules = {name: sys.modules.get(name) for name in module_names}
+         old_sys_path = list(sys.path)
+diff --git a/trigger_store.py b/trigger_store.py
+index cc9d002..782bdc9 100644
+--- a/trigger_store.py
++++ b/trigger_store.py
+@@ -1,17 +1,10 @@
+ import json
+ import logging
+ from pathlib import Path
+-from typing import Any, Dict, List
++from typing import Any, Dict
+ 
+ from astrbot.api.star import StarTools
+ 
+-try:
+-    from .settings import PLUGIN_NAME
+-except ImportError:
+-    if __package__:
+-        raise
+-    from settings import PLUGIN_NAME
+-
+ logger = logging.getLogger(__name__)
+ 
+ 
+@@ -25,7 +18,7 @@ def is_http_url(url: str) -> bool:
+     return url.startswith(("http://", "https://"))
+ 
+ 
+-def get_plugin_data_dir(plugin_name: str = PLUGIN_NAME) -> Path:
++def get_plugin_data_dir(plugin_name: str) -> Path:
+     try:
+         return StarTools.get_data_dir(plugin_name)
+     except Exception:
+@@ -67,24 +60,3 @@ def save_trigger_map(trigger_map: Dict[str, str], config_path: Path) -> None:
+     data = {"trigger_map": trigger_map}
+     with open(config_path, "w", encoding="utf-8") as f:
+         json.dump(data, f, ensure_ascii=False, indent=4)
+-
+-
+-def migrate_legacy_trigger_data(source_paths: List[Path], target_path: Path) -> bool:
+-    if target_path.exists():
+-        return False
+-
+-    for source_path in source_paths:
+-        if not source_path.exists():
+-            continue
+-        if source_path.resolve() == target_path.resolve():
+-            continue
+-
+-        trigger_map = load_trigger_map(source_path)
+-        if not trigger_map:
+-            continue
+-
+-        target_path.parent.mkdir(parents=True, exist_ok=True)
+-        save_trigger_map(trigger_map, target_path)
+-        return True
+-
+-    return False

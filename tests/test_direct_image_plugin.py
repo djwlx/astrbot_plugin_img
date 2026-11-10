@@ -1,13 +1,18 @@
 import asyncio
 import importlib
 import importlib.util
+import io
 import json
 import os
+import random
 import sys
 import types
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
+
+from PIL import Image as PILImage
 
 
 async def collect_async(async_iterable):
@@ -46,67 +51,6 @@ class ChainEvent:
         if self.send_results:
             return self.send_results.pop(0)
         return None
-
-
-class OneBot:
-    def __init__(self):
-        self.group_messages = []
-        self.private_messages = []
-        self.deleted_messages = []
-
-    async def send_group_msg(self, **kwargs):
-        self.group_messages.append(kwargs)
-        return {"message_id": 321}
-
-    async def send_private_msg(self, **kwargs):
-        self.private_messages.append(kwargs)
-        return {"message_id": 654}
-
-    async def delete_msg(self, **kwargs):
-        self.deleted_messages.append(kwargs)
-
-
-class OneBotEvent(ChainEvent):
-    def __init__(self, message_str, group_id="10001", sender_id="20002"):
-        super().__init__(message_str)
-        self.bot = OneBot()
-        self._group_id = group_id
-        self._sender_id = sender_id
-
-    def get_group_id(self):
-        return self._group_id
-
-    def get_sender_id(self):
-        return self._sender_id
-
-    async def send(self, _message):
-        raise AssertionError("OneBot recallable sends should use bot APIs directly")
-
-
-class TelegramClient:
-    def __init__(self):
-        self.photos = []
-        self.deleted_messages = []
-
-    async def send_photo(self, **kwargs):
-        self.photos.append(kwargs)
-        return types.SimpleNamespace(message_id=777)
-
-    async def delete_message(self, **kwargs):
-        self.deleted_messages.append(kwargs)
-
-
-class TelegramEvent(ChainEvent):
-    def __init__(self, message_str, group_id="12345#678"):
-        super().__init__(message_str)
-        self.client = TelegramClient()
-        self.message_obj = types.SimpleNamespace(group_id=group_id, session_id="999")
-
-    def get_sender_id(self):
-        return "999"
-
-    async def send(self, _message):
-        raise AssertionError("Telegram recallable sends should use client APIs directly")
 
 
 def install_astrbot_stubs():
@@ -210,10 +154,7 @@ class DirectImageConfigTests(unittest.TestCase):
         install_astrbot_stubs()
         for module_name in (
             "main",
-            "settings",
             "trigger_store",
-            "image_files",
-            "message_sender",
         ):
             sys.modules.pop(module_name, None)
         self.main = importlib.import_module("main")
@@ -230,7 +171,7 @@ class DirectImageConfigTests(unittest.TestCase):
 
     def test_load_trigger_map_reads_only_string_url_entries(self):
         with TemporaryDirectory() as temp_dir:
-            config_path = Path(temp_dir) / "config.json"
+            config_path = Path(temp_dir) / "triggers.json"
             config_path.write_text(
                 json.dumps(
                     {
@@ -253,7 +194,7 @@ class DirectImageConfigTests(unittest.TestCase):
 
     def test_save_trigger_map_writes_minimal_config_shape(self):
         with TemporaryDirectory() as temp_dir:
-            config_path = Path(temp_dir) / "config.json"
+            config_path = Path(temp_dir) / "triggers.json"
 
             self.main.save_trigger_map(
                 {"cat": "https://example.com/cat.jpg"}, config_path
@@ -263,10 +204,11 @@ class DirectImageConfigTests(unittest.TestCase):
 
         self.assertEqual(result, {"trigger_map": {"cat": "https://example.com/cat.jpg"}})
 
-    def test_migrate_legacy_trigger_data_copies_old_plugin_root_config(self):
+    def test_plugin_starts_empty_when_only_legacy_config_exists(self):
         with TemporaryDirectory() as temp_dir:
-            legacy_path = Path(temp_dir) / "legacy_config.json"
-            trigger_path = Path(temp_dir) / "plugin_data" / "triggers.json"
+            data_dir = Path(temp_dir) / "astrbot_plugin_img"
+            data_dir.mkdir()
+            legacy_path = data_dir / "config.json"
             legacy_path.write_text(
                 json.dumps(
                     {"trigger_map": {"Cat": "https://example.com/cat.jpg"}},
@@ -275,15 +217,12 @@ class DirectImageConfigTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            migrated = self.main.migrate_legacy_trigger_data(
-                [legacy_path],
-                trigger_path,
-            )
+            with patch.dict(os.environ, {"ASTRBOT_PLUGIN_TEST_DATA_DIR": temp_dir}):
+                plugin = self.main.DirectImageTriggerPlugin(object())
 
-            result = json.loads(trigger_path.read_text(encoding="utf-8"))
-
-        self.assertTrue(migrated)
-        self.assertEqual(result, {"trigger_map": {"cat": "https://example.com/cat.jpg"}})
+            self.assertEqual(plugin.trigger_map, {})
+            self.assertFalse(plugin.trigger_file.exists())
+            self.assertTrue(legacy_path.exists())
 
     def test_plugin_uses_astrbot_plugin_data_directory_for_runtime_files(self):
         with TemporaryDirectory() as temp_dir:
@@ -301,103 +240,6 @@ class DirectImageConfigTests(unittest.TestCase):
                 plugin.temp_dir,
                 Path(temp_dir) / "astrbot_plugin_img" / "temp",
             )
-
-    def test_plugin_reads_runtime_options_from_astrbot_config(self):
-        plugin = self.main.DirectImageTriggerPlugin(
-            object(),
-            config={
-                "enable_image_compression": False,
-                "enable_compress_retry": False,
-                "recall_after_seconds": 8,
-            },
-        )
-
-        self.assertFalse(plugin.enable_image_compression)
-        self.assertFalse(plugin.enable_compress_retry)
-        self.assertEqual(plugin.recall_after_seconds, 8)
-
-    def test_schedule_recall_skips_when_recall_delay_is_zero(self):
-        plugin = self.main.DirectImageTriggerPlugin(
-            object(), config={"recall_after_seconds": 0}
-        )
-        event = ChainEvent("cat")
-
-        async def fail_recall(_event, _message_id):
-            raise AssertionError("recall should be disabled")
-
-        plugin._try_recall_message = fail_recall
-
-        plugin._schedule_recall(event, {"message_id": "123"})
-
-    def test_extract_sent_message_id_supports_common_result_shapes(self):
-        class SendResult:
-            message_id = 456
-
-        plugin = self.main.DirectImageTriggerPlugin(object())
-
-        self.assertEqual(plugin._extract_sent_message_id({"msg_id": "123"}), "123")
-        self.assertEqual(plugin._extract_sent_message_id(SendResult()), "456")
-        self.assertIsNone(plugin._extract_sent_message_id(True))
-
-    def test_send_image_path_uses_onebot_api_when_recall_is_enabled(self):
-        plugin = self.main.DirectImageTriggerPlugin(
-            object(), config={"recall_after_seconds": 5}
-        )
-        event = OneBotEvent("cat")
-
-        with TemporaryDirectory() as temp_dir:
-            image_path = Path(temp_dir) / "cat.jpg"
-            image_path.write_bytes(b"image-bytes")
-
-            send_result = asyncio.run(plugin._send_image_path(event, str(image_path)))
-
-        self.assertEqual(send_result, {"message_id": 321})
-        self.assertEqual(event.bot.group_messages[0]["group_id"], 10001)
-        image_segment = event.bot.group_messages[0]["message"][0]
-        self.assertEqual(image_segment["type"], "image")
-        self.assertTrue(image_segment["data"]["file"].startswith("base64://"))
-
-    def test_send_image_path_uses_telegram_client_when_recall_is_enabled(self):
-        plugin = self.main.DirectImageTriggerPlugin(
-            object(), config={"recall_after_seconds": 5}
-        )
-        event = TelegramEvent("cat")
-
-        with TemporaryDirectory() as temp_dir:
-            image_path = Path(temp_dir) / "cat.jpg"
-            image_path.write_bytes(b"image-bytes")
-
-            send_result = asyncio.run(plugin._send_image_path(event, str(image_path)))
-
-        self.assertEqual(send_result.message_id, 777)
-        self.assertEqual(
-            event.client.photos,
-            [
-                {
-                    "photo": str(image_path),
-                    "chat_id": "12345",
-                    "message_thread_id": "678",
-                }
-            ],
-        )
-
-    def test_try_recall_message_uses_onebot_delete_msg(self):
-        plugin = self.main.DirectImageTriggerPlugin(object())
-        event = OneBotEvent("cat")
-
-        result = asyncio.run(plugin._try_recall_message(event, "321"))
-
-        self.assertTrue(result)
-        self.assertEqual(event.bot.deleted_messages, [{"message_id": 321}])
-
-    def test_safe_photo_canvas_size_handles_telegram_photo_limits(self):
-        normal = self.main.safe_photo_canvas_size(1200, 800)
-        wide = self.main.safe_photo_canvas_size(4000, 100)
-        large = self.main.safe_photo_canvas_size(8000, 4000)
-
-        self.assertEqual(normal, (1200, 800))
-        self.assertLessEqual(max(wide) / min(wide), 20)
-        self.assertLessEqual(sum(large), 9900)
 
     def test_list_image_triggers_returns_sorted_trigger_words_without_urls(self):
         plugin = self.main.DirectImageTriggerPlugin(object())
@@ -418,54 +260,290 @@ class DirectImageConfigTests(unittest.TestCase):
 
         self.assertEqual(results, ["暂无图片触发词"])
 
-    def test_prepare_image_file_skips_compression_when_disabled(self):
-        plugin = self.main.DirectImageTriggerPlugin(
-            object(), config={"enable_image_compression": False}
-        )
+    def test_on_message_sends_downloaded_original_image(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
+        plugin.trigger_map = {"cat": "https://example.com/cat.jpg"}
+        event = ChainEvent("  Cat  ")
+
+        with TemporaryDirectory() as temp_dir:
+            plugin.temp_dir = Path(temp_dir)
+            image_path = Path(temp_dir) / "original.jpg"
+            image_path.write_bytes(b"original-image-bytes")
+            unrelated_path = Path(temp_dir) / "previous-failure.jpg"
+            unrelated_path.write_bytes(b"keep-this-file")
+
+            original_send = event.send
+
+            async def checked_send(message):
+                self.assertEqual(image_path.read_bytes(), b"original-image-bytes")
+                await original_send(message)
+
+            event.send = checked_send
+
+            async def fake_download(url):
+                self.assertEqual(url, "https://example.com/cat.jpg")
+                return str(image_path)
+
+            plugin._download_direct_image = fake_download
+            asyncio.run(plugin.on_message(event))
+
+            self.assertEqual(len(event.sent_messages), 1)
+            self.assertEqual(event.sent_messages[0].chain[0].path, str(image_path))
+            self.assertFalse(image_path.exists())
+            self.assertEqual(unrelated_path.read_bytes(), b"keep-this-file")
+        self.assertTrue(event.stopped)
+
+    def test_on_message_reports_download_failure(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
+        plugin.trigger_map = {"cat": "https://example.com/cat.jpg"}
+        event = ChainEvent("cat")
 
         async def fake_download(_url):
-            return "/tmp/original.jpg"
-
-        def fail_normalize(_path):
-            raise AssertionError("compression should be disabled")
+            return None
 
         plugin._download_direct_image = fake_download
-        plugin._normalize_photo_dimensions = fail_normalize
+        asyncio.run(plugin.on_message(event))
 
-        image_path, cleanup_paths = asyncio.run(
-            plugin._prepare_image_file("https://example.com/cat.jpg")
+        self.assertEqual(len(event.sent_messages), 1)
+        self.assertEqual(
+            event.sent_messages[0].chain[0].text,
+            "获取图片失败，请检查图片 URL 是否有效",
         )
+        self.assertTrue(event.stopped)
 
-        self.assertEqual(image_path, "/tmp/original.jpg")
-        self.assertEqual(cleanup_paths, ["/tmp/original.jpg"])
-
-    def test_on_message_retries_with_compressed_image_after_send_failure(self):
-        plugin = self.main.DirectImageTriggerPlugin(
-            object(),
-            config={
-                "enable_image_compression": False,
-                "enable_compress_retry": True,
-            },
-        )
+    def test_on_message_reports_send_failure(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
         plugin.trigger_map = {"cat": "https://example.com/cat.jpg"}
-        cleanup_paths = []
-
-        async def fake_download(url):
-            self.assertEqual(url, "https://example.com/cat.jpg")
-            return "/tmp/original.jpg"
-
-        plugin._download_direct_image = fake_download
-        plugin._normalize_photo_dimensions = lambda path: "/tmp/compressed.jpg"
-        plugin._schedule_cleanup = cleanup_paths.extend
         event = ChainEvent("cat")
         event.send_errors.append(RuntimeError("send failed"))
 
-        asyncio.run(plugin.on_message(event))
+        with TemporaryDirectory() as temp_dir:
+            plugin.temp_dir = Path(temp_dir)
+            image_path = Path(temp_dir) / "original.jpg"
+            image_path.write_bytes(b"original-image-bytes")
 
-        sent_paths = [message.chain[0].path for message in event.sent_messages]
-        self.assertEqual(sent_paths, ["/tmp/original.jpg", "/tmp/compressed.jpg"])
+            async def fake_download(_url):
+                return str(image_path)
+
+            plugin._download_direct_image = fake_download
+            asyncio.run(plugin.on_message(event))
+
+            self.assertEqual(len(event.sent_messages), 2)
+            self.assertEqual(event.sent_messages[0].chain[0].path, str(image_path))
+            self.assertEqual(image_path.read_bytes(), b"original-image-bytes")
+        self.assertEqual(
+            event.sent_messages[1].chain[0].text,
+            "发送图片失败，请稍后重试",
+        )
         self.assertTrue(event.stopped)
-        self.assertEqual(cleanup_paths, ["/tmp/original.jpg", "/tmp/compressed.jpg"])
+
+    def test_image_at_size_limit_is_kept_unchanged(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
+        with TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "original.png"
+            with PILImage.new("RGB", (8, 8), "red") as image:
+                image.save(image_path)
+            with image_path.open("ab") as image_file:
+                image_file.truncate(self.main.MAX_IMAGE_BYTES)
+
+            result = plugin._compress_image_to_webp(str(image_path))
+
+            self.assertEqual(result, str(image_path))
+            self.assertEqual(image_path.stat().st_size, 4_000_000)
+
+    def test_large_transparent_image_is_sent_as_webp_under_four_mb(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
+        plugin.trigger_map = {"cat": "https://example.com/cat.png"}
+        event = ChainEvent("cat")
+        sent_data = []
+        original_send = event.send
+
+        async def capture_send(message):
+            sent_data.append(Path(message.chain[0].path).read_bytes())
+            await original_send(message)
+
+        event.send = capture_send
+        with TemporaryDirectory() as temp_dir:
+            plugin.temp_dir = Path(temp_dir)
+            source_path = plugin.temp_dir / "original.png"
+            pixels = random.Random(7).randbytes(1200 * 1000 * 3)
+            with PILImage.frombytes("RGB", (1200, 1000), pixels) as image:
+                image.putalpha(128)
+                image.save(source_path, compress_level=0)
+            self.assertGreater(source_path.stat().st_size, 4_000_000)
+
+            async def fake_download(_url):
+                return str(source_path)
+
+            plugin._download_direct_image = fake_download
+            asyncio.run(plugin.on_message(event))
+
+            self.assertEqual(len(event.sent_messages), 1)
+            sent_path = Path(event.sent_messages[0].chain[0].path)
+            self.assertEqual(sent_path.suffix, ".webp")
+            self.assertLessEqual(len(sent_data[0]), 4_000_000)
+            with PILImage.open(io.BytesIO(sent_data[0])) as image:
+                self.assertEqual(image.format, "WEBP")
+                self.assertEqual(image.size, (1200, 1000))
+                self.assertEqual(image.getchannel("A").getextrema(), (128, 128))
+            self.assertFalse(source_path.exists())
+            self.assertFalse(sent_path.exists())
+        self.assertTrue(event.stopped)
+
+    def test_oversized_webp_is_resized_when_quality_reduction_is_insufficient(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
+        with TemporaryDirectory() as temp_dir:
+            plugin.temp_dir = Path(temp_dir)
+            source_path = plugin.temp_dir / "original.webp"
+            pixels = random.Random(8).randbytes(160 * 120 * 3)
+            with PILImage.frombytes("RGB", (160, 120), pixels) as image:
+                image.save(source_path, lossless=True)
+
+            with patch.object(self.main, "MAX_IMAGE_BYTES", 1000):
+                result = plugin._compress_image_to_webp(str(source_path))
+
+            self.assertNotEqual(result, str(source_path))
+            self.assertLessEqual(Path(result).stat().st_size, 1000)
+            with PILImage.open(result) as image:
+                self.assertLess(image.width, 160)
+                self.assertLess(image.height, 120)
+
+    def test_gif_compression_preserves_animation_timing_and_loop(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
+        with TemporaryDirectory() as temp_dir:
+            plugin.temp_dir = Path(temp_dir)
+            source_path = plugin.temp_dir / "original.gif"
+            frames = [
+                PILImage.new("RGB", (64, 64), color)
+                for color in ("red", "green", "blue")
+            ]
+            try:
+                frames[0].save(
+                    source_path,
+                    save_all=True,
+                    append_images=frames[1:],
+                    duration=[80, 120, 160],
+                    loop=2,
+                )
+            finally:
+                for frame in frames:
+                    frame.close()
+            with source_path.open("ab") as image_file:
+                image_file.truncate(1001)
+
+            with patch.object(self.main, "MAX_IMAGE_BYTES", 1000):
+                result = plugin._compress_image_to_webp(str(source_path))
+
+            self.assertLessEqual(Path(result).stat().st_size, 1000)
+            with PILImage.open(result) as image:
+                self.assertEqual(image.format, "WEBP")
+                self.assertEqual(image.n_frames, 3)
+                self.assertEqual(image.info["loop"], 2)
+                durations = []
+                for index in range(image.n_frames):
+                    image.seek(index)
+                    image.load()
+                    durations.append(image.info["duration"])
+                self.assertEqual(durations, [80, 120, 160])
+
+    def test_compression_failure_does_not_send_oversized_original(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
+        plugin.trigger_map = {"cat": "https://example.com/cat.png"}
+        event = ChainEvent("cat")
+        with TemporaryDirectory() as temp_dir:
+            plugin.temp_dir = Path(temp_dir)
+            source_path = Path(temp_dir) / "invalid.png"
+            with source_path.open("wb") as image_file:
+                image_file.truncate(self.main.MAX_IMAGE_BYTES + 1)
+
+            async def fake_download(_url):
+                return str(source_path)
+
+            plugin._download_direct_image = fake_download
+            asyncio.run(plugin.on_message(event))
+
+            self.assertEqual(len(event.sent_messages), 1)
+            self.assertIn("图片压缩失败", event.sent_messages[0].chain[0].text)
+            self.assertTrue(source_path.exists())
+        self.assertTrue(event.stopped)
+
+    def test_failed_send_preserves_original_and_compressed_image(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
+        plugin.trigger_map = {"cat": "https://example.com/cat.png"}
+        event = ChainEvent("cat")
+        event.send_errors.append(RuntimeError("send failed"))
+        with TemporaryDirectory() as temp_dir:
+            plugin.temp_dir = Path(temp_dir)
+            source_path = plugin.temp_dir / "original.png"
+            pixels = random.Random(9).randbytes(160 * 120 * 3)
+            with PILImage.frombytes("RGB", (160, 120), pixels) as image:
+                image.save(source_path)
+
+            async def fake_download(_url):
+                return str(source_path)
+
+            plugin._download_direct_image = fake_download
+            with patch.object(self.main, "MAX_IMAGE_BYTES", 1000):
+                asyncio.run(plugin.on_message(event))
+
+            sent_path = Path(event.sent_messages[0].chain[0].path)
+            self.assertEqual(sent_path.suffix, ".webp")
+            self.assertTrue(source_path.exists())
+            self.assertTrue(sent_path.exists())
+            self.assertEqual(len(event.sent_messages), 2)
+        self.assertTrue(event.stopped)
+
+    def test_cleanup_failure_does_not_report_send_failure(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
+        plugin.trigger_map = {"cat": "https://example.com/cat.jpg"}
+        event = ChainEvent("cat")
+        with TemporaryDirectory() as temp_dir:
+            plugin.temp_dir = Path(temp_dir)
+            source_path = plugin.temp_dir / "original.jpg"
+            source_path.write_bytes(b"original-image-bytes")
+
+            async def fake_download(_url):
+                return str(source_path)
+
+            plugin._download_direct_image = fake_download
+            with (
+                patch.object(Path, "unlink", side_effect=PermissionError),
+                self.assertLogs(self.main.logger, level="WARNING") as logs,
+            ):
+                asyncio.run(plugin.on_message(event))
+
+            self.assertEqual(len(event.sent_messages), 1)
+            self.assertTrue(source_path.exists())
+            self.assertIn("清理图片临时文件失败", logs.output[0])
+        self.assertTrue(event.stopped)
+
+    def test_cleanup_skips_files_outside_temp_directory_and_symlinks(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
+        with TemporaryDirectory() as temp_dir, TemporaryDirectory() as outside_dir:
+            plugin.temp_dir = Path(temp_dir)
+            outside_path = Path(outside_dir) / "keep.jpg"
+            outside_path.write_bytes(b"keep-this-file")
+            symlink_path = plugin.temp_dir / "link.jpg"
+            symlink_path.symlink_to(outside_path)
+
+            with self.assertLogs(self.main.logger, level="WARNING"):
+                plugin._cleanup_image_files(str(outside_path), str(symlink_path))
+
+            self.assertEqual(outside_path.read_bytes(), b"keep-this-file")
+            self.assertTrue(symlink_path.is_symlink())
+
+    def test_send_rejects_oversized_file_even_if_compression_was_bypassed(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
+        event = ChainEvent("cat")
+        with TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "oversized.webp"
+            with image_path.open("wb") as image_file:
+                image_file.truncate(self.main.MAX_IMAGE_BYTES + 1)
+
+            with self.assertRaises(ValueError):
+                asyncio.run(plugin._send_image_path(event, str(image_path)))
+
+        self.assertEqual(event.sent_messages, [])
 
     def test_on_message_ignores_non_text_message_str(self):
         plugin = self.main.DirectImageTriggerPlugin(object())
@@ -476,24 +554,6 @@ class DirectImageConfigTests(unittest.TestCase):
 
         self.assertFalse(event.stopped)
         self.assertEqual(event.sent_messages, [])
-
-    def test_supports_onebot_send_when_only_one_method_exists(self):
-        class PartialOneBot:
-            async def send_group_msg(self, **kwargs):
-                return kwargs
-
-        event = ChainEvent("cat")
-        event.bot = PartialOneBot()
-
-        self.assertTrue(self.main.ImageMessageSender._supports_onebot_send(event))
-
-    def test_conf_schema_defines_runtime_options(self):
-        schema_path = Path(__file__).resolve().parents[1] / "_conf_schema.json"
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
-
-        self.assertIn("enable_image_compression", schema)
-        self.assertIn("enable_compress_retry", schema)
-        self.assertIn("recall_after_seconds", schema)
 
     def test_changelog_contains_metadata_version(self):
         repo_root = Path(__file__).resolve().parents[1]
@@ -516,15 +576,9 @@ class DirectImageConfigTests(unittest.TestCase):
         ]
         module_names = package_names + [
             "main",
-            "settings",
             "trigger_store",
-            "image_files",
-            "message_sender",
             "data.plugins.astrbot_plugin_img.main",
-            "data.plugins.astrbot_plugin_img.settings",
             "data.plugins.astrbot_plugin_img.trigger_store",
-            "data.plugins.astrbot_plugin_img.image_files",
-            "data.plugins.astrbot_plugin_img.message_sender",
         ]
         old_modules = {name: sys.modules.get(name) for name in module_names}
         old_sys_path = list(sys.path)

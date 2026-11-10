@@ -1,16 +1,9 @@
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from astrbot.api.star import StarTools
-
-try:
-    from .settings import PLUGIN_NAME
-except ImportError:
-    if __package__:
-        raise
-    from settings import PLUGIN_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +18,7 @@ def is_http_url(url: str) -> bool:
     return url.startswith(("http://", "https://"))
 
 
-def get_plugin_data_dir(plugin_name: str = PLUGIN_NAME) -> Path:
+def get_plugin_data_dir(plugin_name: str) -> Path:
     try:
         return StarTools.get_data_dir(plugin_name)
     except Exception:
@@ -67,24 +60,3 @@ def save_trigger_map(trigger_map: Dict[str, str], config_path: Path) -> None:
     data = {"trigger_map": trigger_map}
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
-
-
-def migrate_legacy_trigger_data(source_paths: List[Path], target_path: Path) -> bool:
-    if target_path.exists():
-        return False
-
-    for source_path in source_paths:
-        if not source_path.exists():
-            continue
-        if source_path.resolve() == target_path.resolve():
-            continue
-
-        trigger_map = load_trigger_map(source_path)
-        if not trigger_map:
-            continue
-
-        target_path.parent.mkdir(parents=True, exist_ok=True)
-        save_trigger_map(trigger_map, target_path)
-        return True
-
-    return False

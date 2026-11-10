@@ -68,14 +68,14 @@ prov_id = await self.context.get_current_chat_provider_id(umo)
 
 Hooks 分为两层，不建议在"概念清单"里重复列举具体 hook 名单（容易过时）：
 
-- 插件事件钩子（`@filter.on_*`）：见 `skill-astrbot-dev/plugin_config/hooks.md`
-- Agent 运行钩子（`BaseAgentRunHooks`）：见 `skill-astrbot-dev/agent/agent-related-hooks.md`
+- 插件事件钩子（`@filter.on_*`）：见 `plugin_config/hooks.md`
+- Agent 运行钩子（`BaseAgentRunHooks`）：见 `agent/agent-related-hooks.md`
 
 ### 6. Agent 智能体
 
-- Agent 相关能力（tools / providers / persona / sandbox / cron / subagents）：见 `skill-astrbot-dev/agent/`
+- Agent 相关能力（tools / providers / persona / sandbox / cron / subagents）：见 `agent/`
 - `context.tool_loop_agent(...)`: 调用工具循环 Agent（可结合子智能体 handoff）
-- v4.7.0+ Agent Runner 架构：见 `skill-astrbot-dev/agent/agent-runner.md`
+- v4.7.0+ Agent Runner 架构：见 `agent/agent-runner.md`
 
 ### 7. Tool 定义 (v4.5.7+ 推荐)
 

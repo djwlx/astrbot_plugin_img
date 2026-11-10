@@ -1,5 +1,7 @@
 # astrbot_plugin_img
 
+![插件 Logo](logo.png)
+
 自定义图片触发词插件 for AstrBot。
 
 > 极简图片发送插件：为触发词绑定一个直接图片 URL，发送触发词即可返回图片。
@@ -10,6 +12,21 @@
 - 删除图片触发词
 - 列出所有图片触发词
 - 发送触发词自动返回对应图片
+- 超过 4 MB 的图片自动压缩为 WebP，发送文件不超过 4,000,000 字节
+
+声明支持 QQ 官方机器人、个人微信（ClawBot）和 KOOK。
+
+## 处理流程
+
+1. 启动时读取插件数据目录下的 `triggers.json`，加载触发词与图片 URL 的绑定。
+2. 添加或删除绑定后立即保存；触发词会去除首尾空白并转为小写，同名绑定会被覆盖。列表命令只展示触发词。
+3. 收到消息后按完整文本匹配触发词，忽略以 `/` 开头的消息和未匹配的消息。
+4. 命中后使用 `aiohttp` 下载图片，超时为 10 秒；仅接受 HTTP 200 且 `Content-Type` 为 `image/*` 的响应，保存到 `temp/`。
+5. 文件不超过 4,000,000 字节时保留原图；超限时在后台线程中用 Pillow 转成 WebP，依次尝试质量 85、65、45、25。仍超限则将宽高缩至 75% 后重复尝试。
+6. 发送前再次检查大小，通过 AstrBot 的 `Image` 消息组件发送。下载、压缩或发送失败时回复对应提示，随后结束该消息事件的处理。
+7. 发送接口正常返回后，清理本次下载的原图及压缩图；失败时保留文件，清理失败只记录日志。
+
+失败时保留的图片可在 `temp/` 中查看或手动清理；绑定数据由所有会话共用。
 
 ## 安装
 
@@ -52,26 +69,21 @@ pip install -r requirements.txt
 - 只支持直接图片 URL。
 - 图片 URL 必须以 `http://` 或 `https://` 开头。
 - 发送时插件会校验目标响应的 `Content-Type` 是否为 `image/*`。
-- 发送时会先把图片下载到本地临时文件，再交给 AstrBot 发送，便于适配 Telegram、KOOK 等平台。
-- 对非动图图片，插件会尝试按 Telegram `sendPhoto` 的尺寸限制进行缩放或补边处理。
+- 发送时会先把图片下载到本地临时文件，再交给 AstrBot 发送。
+- 不超过 4 MB 的图片原样发送；超限图片先转为 WebP，逐步降低质量，必要时等比缩小尺寸。
+- 动图压缩时保留动画帧、帧时长和循环设置。无法压缩到上限内或超出像素/帧数处理限制时会提示失败，不发送超限原图。
 - 不支持 API 返回 JSON、文本链接、本地图片路径或视频。
 
 ## 数据存储
 
 - 触发词数据保存到 `data/plugin_data/astrbot_plugin_img/triggers.json`。
-- 临时图片保存到 `data/plugin_data/astrbot_plugin_img/temp/`，发送后会延迟清理。
-- 旧版本插件根目录下的 `config.json` 或 `data/plugin_data/astrbot_plugin_img/config.json` 会在首次启动时自动迁移到新位置。
-- `data/config/` 是 AstrBot 核心配置和插件 `_conf_schema.json` 配置目录，不用于保存本插件运行时触发词数据。
+- 下载的原图与压缩后的 WebP 保存到 `data/plugin_data/astrbot_plugin_img/temp/`；发送接口正常返回后删除本次图片，下载、压缩或发送失败时保留。历史失败文件可按需手动清理。
 
 ## 插件配置
 
-AstrBot 会根据 `_conf_schema.json` 在 `data/config/astrbot_plugin_img_config.json` 生成插件配置。
+无需额外配置。插件下载图片并按固定的 4 MB 上限处理后，通过 AstrBot 消息接口发送。
 
-| 配置项 | 默认值 | 说明 |
-| --- | --- | --- |
-| `enable_image_compression` | `true` | 发送前是否压缩/补边图片。关闭后下载原图并直接发送。 |
-| `enable_compress_retry` | `true` | 原图发送失败后，是否压缩/补边并重试一次。 |
-| `recall_after_seconds` | `0` | 多少秒后撤回图片。`0` 表示不撤回；仅在平台适配器能返回已发送消息 ID 并支持删除消息时生效。 |
+旧版压缩开关、压缩重试和定时撤回配置不再读取。
 
 ## 版本维护
 
@@ -80,4 +92,8 @@ AstrBot 会根据 `_conf_schema.json` 在 `data/config/astrbot_plugin_img_config
 
 ## 开发
 
-基于 AstrBot 插件框架开发，使用 `aiohttp` 下载直接图片 URL，并使用 `Pillow` 处理图片尺寸。OneBot/aiocqhttp 平台在开启撤回时会直接调用平台发送 API 以获取 `message_id`。
+基于 AstrBot 插件框架开发，使用 `aiohttp` 下载直接图片 URL，再通过 AstrBot 的 `Image` 消息组件发送本地图片。
+
+使用来自 [PyPI 的 Pillow 12.3.0](https://pypi.org/project/pillow/12.3.0/) 编码 WebP，压缩在后台线程中执行。Pillow 依赖已固定版本，运行环境需要 Python 3.10 或以上。
+
+运行代码分为两个文件：`main.py` 负责命令、触发匹配、图片下载与发送；`trigger_store.py` 负责触发词校验与数据读写。
