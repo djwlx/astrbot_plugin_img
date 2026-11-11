@@ -1,7 +1,6 @@
 import asyncio
 import errno
 import io
-import logging
 import time
 import uuid
 from pathlib import Path
@@ -11,6 +10,7 @@ import aiohttp
 from PIL import Image as PILImage
 from PIL import ImageOps, UnidentifiedImageError, features
 
+from astrbot.api import logger
 from astrbot.api.event import AstrMessageEvent, MessageChain, filter
 from astrbot.api.message_components import Image, Plain
 from astrbot.api.star import Context, Star, register
@@ -34,10 +34,8 @@ except ImportError:
         save_trigger_map,
     )
 
-logger = logging.getLogger(__name__)
-
 PLUGIN_NAME = "astrbot_plugin_img"
-PLUGIN_VERSION = "v2.1.7"
+PLUGIN_VERSION = "v2.1.8"
 TRIGGER_DATA_FILENAME = "triggers.json"
 MAX_IMAGE_BYTES = 4_000_000
 

@@ -1,11 +1,9 @@
 import json
-import logging
 from pathlib import Path
 from typing import Any, Dict
 
+from astrbot.api import logger
 from astrbot.api.star import StarTools
-
-logger = logging.getLogger(__name__)
 
 
 def normalize_trigger(trigger: Any) -> str:
@@ -37,7 +35,7 @@ def load_trigger_map(config_path: Path) -> Dict[str, str]:
         with open(config_path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception as exc:
-        logger.error("加载配置失败: %s", exc)
+        logger.error("加载配置失败: 异常类型=%s", type(exc).__name__)
         return {}
 
     raw_map = data.get("trigger_map", {})

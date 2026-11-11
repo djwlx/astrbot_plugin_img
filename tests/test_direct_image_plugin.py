@@ -4,6 +4,7 @@ import importlib
 import importlib.util
 import io
 import json
+import logging
 import os
 import random
 import sys
@@ -57,6 +58,7 @@ class ChainEvent:
 def install_astrbot_stubs():
     astrbot = types.ModuleType("astrbot")
     astrbot_api = types.ModuleType("astrbot.api")
+    astrbot_api.logger = logging.getLogger("astrbot")
     aiohttp_mod = types.ModuleType("aiohttp")
     event_mod = types.ModuleType("astrbot.api.event")
     star_mod = types.ModuleType("astrbot.api.star")
@@ -287,6 +289,7 @@ class DirectImageConfigTests(unittest.TestCase):
                     result = asyncio.run(plugin._download_direct_image(url))
 
                 logged = "\n".join(logs.output)
+                self.assertTrue(all(record.name == "astrbot" for record in logs.records))
                 self.assertIn(expected, logged)
                 self.assertNotIn(url, logged)
                 self.assertNotIn("secret-token", logged)
