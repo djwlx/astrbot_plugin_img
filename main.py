@@ -2,6 +2,7 @@ import asyncio
 import errno
 import io
 import logging
+import time
 import uuid
 from pathlib import Path
 from typing import Dict, Optional
@@ -36,12 +37,12 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 PLUGIN_NAME = "astrbot_plugin_img"
-PLUGIN_VERSION = "v2.1.4"
+PLUGIN_VERSION = "v2.1.7"
 TRIGGER_DATA_FILENAME = "triggers.json"
 MAX_IMAGE_BYTES = 4_000_000
-MAX_IMAGE_PIXELS = 40_000_000
-MAX_ANIMATION_FRAMES = 300
-MAX_ANIMATION_PIXELS = 80_000_000
+
+# 按插件约定允许任意像素数的图片进入压缩，不使用 Pillow 的像素阈值拦截。
+PILImage.MAX_IMAGE_PIXELS = None
 
 CONTENT_TYPE_EXTENSIONS = {
     "image/jpeg": ".jpg",
@@ -136,8 +137,6 @@ class DirectImageTriggerPlugin(Star):
                 reason = str(exc)
             elif isinstance(exc, UnidentifiedImageError):
                 reason = "图片格式无法识别或文件已损坏"
-            elif isinstance(exc, PILImage.DecompressionBombError):
-                reason = "图片像素过多，已停止解码"
             elif isinstance(exc, MemoryError):
                 reason = "压缩时内存不足"
             elif isinstance(exc, FileNotFoundError):
@@ -156,7 +155,7 @@ class DirectImageTriggerPlugin(Star):
         try:
             await self._send_image_path(event, image_path)
         except Exception as exc:
-            logger.warning("发送图片失败: %s", exc)
+            logger.warning("发送图片失败: 异常类型=%s", type(exc).__name__)
             await self._safe_send_plain(event, "发送图片失败，请稍后重试")
         else:
             self._cleanup_image_files(original_path, image_path)
@@ -164,32 +163,41 @@ class DirectImageTriggerPlugin(Star):
         event.stop_event()
 
     async def _download_direct_image(self, url: str) -> Optional[str]:
+        started = time.perf_counter()
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     url,
                     allow_redirects=True,
-                    timeout=aiohttp.ClientTimeout(total=10),
+                    timeout=aiohttp.ClientTimeout(total=20),
                 ) as resp:
                     if resp.status != 200:
+                        logger.warning("获取图片失败: HTTP 状态码=%s", resp.status)
                         return None
 
                     content_type = resp.headers.get("Content-Type", "").lower()
-                    if not content_type.startswith("image/"):
-                        return None
-
                     ext = content_type_to_extension(content_type)
                     image_path = self.temp_dir / f"{uuid.uuid4()}{ext}"
                     data = await resp.read()
                     with open(image_path, "wb") as f:
                         f.write(data)
+                    logger.info(
+                        "获取图片成功: 字节数=%d 耗时=%.2f秒",
+                        len(data), time.perf_counter() - started,
+                    )
                     return str(image_path)
+        except asyncio.TimeoutError:
+            logger.warning("获取图片失败: 下载超时（20秒）")
+            return None
         except Exception as exc:
-            logger.error("获取图片失败: %s", exc)
+            logger.error("获取图片失败: 异常类型=%s", type(exc).__name__)
             return None
 
     def _compress_image_to_webp(self, image_path: str) -> str:
-        if Path(image_path).stat().st_size <= MAX_IMAGE_BYTES:
+        started = time.perf_counter()
+        source_bytes = Path(image_path).stat().st_size
+        if source_bytes <= MAX_IMAGE_BYTES:
+            logger.info("图片无需压缩: 字节数=%d，使用原图", source_bytes)
             return image_path
         if not features.check("webp"):
             raise ImageCompressionError("当前 Pillow 缺少 WebP 编码支持")
@@ -198,22 +206,13 @@ class DirectImageTriggerPlugin(Star):
         durations = []
         try:
             with PILImage.open(image_path) as image:
-                width, height = image.size
                 frame_count = (
                     image.n_frames if getattr(image, "is_animated", False) else 1
                 )
-                if width * height > MAX_IMAGE_PIXELS:
-                    raise ImageCompressionError(
-                        f"图片尺寸 {width}×{height}，超过 4000 万像素处理上限"
-                    )
-                if frame_count > MAX_ANIMATION_FRAMES:
-                    raise ImageCompressionError(
-                        f"动图有 {frame_count} 帧，超过 {MAX_ANIMATION_FRAMES} 帧处理上限"
-                    )
-                if width * height * frame_count > MAX_ANIMATION_PIXELS:
-                    raise ImageCompressionError(
-                        f"动图尺寸 {width}×{height}、共 {frame_count} 帧，累计像素超过 8000 万处理上限"
-                    )
+                logger.info(
+                    "开始图片压缩: 原始字节数=%d 尺寸=%d×%d 帧数=%d",
+                    source_bytes, image.width, image.height, frame_count,
+                )
                 loop = image.info.get("loop", 0)
                 for index in range(frame_count):
                     image.seek(index)
@@ -240,6 +239,13 @@ class DirectImageTriggerPlugin(Star):
                             target_path = self.temp_dir / f"{uuid.uuid4()}.webp"
                             with open(target_path, "xb") as target:
                                 target.write(output.getbuffer())
+                            logger.info(
+                                "图片压缩成功: 原始字节数=%d 压缩后字节数=%d "
+                                "尺寸=%d×%d 帧数=%d 质量=%d 耗时=%.2f秒",
+                                source_bytes, output.tell(),
+                                frames[0].width, frames[0].height, len(frames), quality,
+                                time.perf_counter() - started,
+                            )
                             return str(target_path)
 
                 width, height = frames[0].size
@@ -254,9 +260,11 @@ class DirectImageTriggerPlugin(Star):
                 frame.close()
 
     async def _send_image_path(self, event: AstrMessageEvent, image_path: str) -> None:
-        if Path(image_path).stat().st_size > MAX_IMAGE_BYTES:
+        image_bytes = Path(image_path).stat().st_size
+        if image_bytes > MAX_IMAGE_BYTES:
             raise ValueError("图片文件超过 4 MB，拒绝发送")
         await event.send(MessageChain([Image.fromFileSystem(image_path)]))
+        logger.info("发送图片成功: 字节数=%d", image_bytes)
 
     def _cleanup_image_files(self, *image_paths: str) -> None:
         for image_path in dict.fromkeys(image_paths):
@@ -266,11 +274,13 @@ class DirectImageTriggerPlugin(Star):
                     logger.warning("跳过非插件临时文件清理")
                     continue
                 path.unlink(missing_ok=True)
+                logger.info("图片临时文件清理完成")
             except (OSError, RuntimeError, ValueError) as exc:
                 logger.warning("清理图片临时文件失败: %s", type(exc).__name__)
 
     async def _safe_send_plain(self, event: AstrMessageEvent, text: str) -> None:
         try:
             await event.send(MessageChain([Plain(text)]))
+            logger.info("发送文本提示成功")
         except Exception as exc:
-            logger.error("发送文本提示失败: %s", exc)
+            logger.error("发送文本提示失败: 异常类型=%s", type(exc).__name__)

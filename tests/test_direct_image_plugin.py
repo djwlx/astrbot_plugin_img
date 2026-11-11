@@ -11,7 +11,7 @@ import types
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from PIL import Image as PILImage
 
@@ -261,6 +261,42 @@ class DirectImageConfigTests(unittest.TestCase):
 
         self.assertEqual(results, ["暂无图片触发词"])
 
+    def test_download_logs_outcome_without_exposing_url_or_exception_text(self):
+        plugin = self.main.DirectImageTriggerPlugin(object())
+        url = "https://example.com/image?token=secret-token"
+        with TemporaryDirectory() as temp_dir:
+            plugin.temp_dir = Path(temp_dir)
+            for status, error, expected in (
+                (200, None, "获取图片成功"),
+                (403, None, "HTTP 状态码=403"),
+                (200, RuntimeError(f"failed: {url}\nprivate-message"), "RuntimeError"),
+                (200, asyncio.TimeoutError(), "下载超时（20秒）"),
+            ):
+                response = MagicMock()
+                response.status = status
+                response.headers = {"Content-Type": "application/octet-stream"}
+                response.read = AsyncMock(return_value=b"image-bytes", side_effect=error)
+                session = MagicMock()
+                session.__aenter__.return_value = session
+                session.get.return_value.__aenter__.return_value = response
+                with (
+                    self.subTest(status=status, error=type(error).__name__),
+                    patch.object(self.main.aiohttp, "ClientSession", return_value=session),
+                    self.assertLogs(self.main.logger, level="INFO") as logs,
+                ):
+                    result = asyncio.run(plugin._download_direct_image(url))
+
+                logged = "\n".join(logs.output)
+                self.assertIn(expected, logged)
+                self.assertNotIn(url, logged)
+                self.assertNotIn("secret-token", logged)
+                self.assertNotIn("private-message", logged)
+                self.assertEqual(session.get.call_args.kwargs["timeout"].total, 20)
+                if status == 200 and error is None:
+                    self.assertEqual(Path(result).read_bytes(), b"image-bytes")
+                else:
+                    self.assertIsNone(result)
+
     def test_on_message_sends_downloaded_original_image(self):
         plugin = self.main.DirectImageTriggerPlugin(object())
         plugin.trigger_map = {"cat": "https://example.com/cat.jpg"}
@@ -286,7 +322,13 @@ class DirectImageConfigTests(unittest.TestCase):
                 return str(image_path)
 
             plugin._download_direct_image = fake_download
-            asyncio.run(plugin.on_message(event))
+            with self.assertLogs(self.main.logger, level="INFO") as logs:
+                asyncio.run(plugin.on_message(event))
+
+            logged = "\n".join(logs.output)
+            self.assertIn("图片无需压缩", logged)
+            self.assertIn("发送图片成功", logged)
+            self.assertIn("图片临时文件清理完成", logged)
 
             self.assertEqual(len(event.sent_messages), 1)
             self.assertEqual(event.sent_messages[0].chain[0].path, str(image_path))
@@ -316,7 +358,7 @@ class DirectImageConfigTests(unittest.TestCase):
         plugin = self.main.DirectImageTriggerPlugin(object())
         plugin.trigger_map = {"cat": "https://example.com/cat.jpg"}
         event = ChainEvent("cat")
-        event.send_errors.append(RuntimeError("send failed"))
+        event.send_errors.append(RuntimeError("send failed: secret-token private-message"))
 
         with TemporaryDirectory() as temp_dir:
             plugin.temp_dir = Path(temp_dir)
@@ -327,7 +369,15 @@ class DirectImageConfigTests(unittest.TestCase):
                 return str(image_path)
 
             plugin._download_direct_image = fake_download
-            asyncio.run(plugin.on_message(event))
+            with self.assertLogs(self.main.logger, level="INFO") as logs:
+                asyncio.run(plugin.on_message(event))
+
+            logged = "\n".join(logs.output)
+            self.assertIn("发送图片失败", logged)
+            self.assertIn("RuntimeError", logged)
+            self.assertNotIn("发送图片成功", logged)
+            self.assertNotIn("secret-token", logged)
+            self.assertNotIn("private-message", logged)
 
             self.assertEqual(len(event.sent_messages), 2)
             self.assertEqual(event.sent_messages[0].chain[0].path, str(image_path))
@@ -469,12 +519,34 @@ class DirectImageConfigTests(unittest.TestCase):
             self.assertTrue(source_path.exists())
         self.assertTrue(event.stopped)
 
-    def test_compression_reports_actual_dimensions_and_frame_limits(self):
+    def test_compression_accepts_over_forty_million_pixels_with_pillow_limit_disabled(self):
+        with patch.object(PILImage, "MAX_IMAGE_PIXELS", 100):
+            importlib.reload(self.main)
+            plugin = self.main.DirectImageTriggerPlugin(object())
+            with TemporaryDirectory() as temp_dir:
+                plugin.temp_dir = Path(temp_dir)
+                source_path = plugin.temp_dir / "large.png"
+                with PILImage.new("L", (6400, 6400), 128) as image:
+                    image.save(source_path)
+                with source_path.open("ab") as image_file:
+                    image_file.truncate(self.main.MAX_IMAGE_BYTES + 1)
+
+                result = plugin._compress_image_to_webp(str(source_path))
+
+                self.assertLessEqual(Path(result).stat().st_size, self.main.MAX_IMAGE_BYTES)
+                with PILImage.open(result) as image:
+                    self.assertEqual(image.format, "WEBP")
+                    self.assertEqual(image.size, (6400, 6400))
+
+    def test_compression_preserves_animation_with_more_than_three_hundred_frames(self):
         plugin = self.main.DirectImageTriggerPlugin(object())
         with TemporaryDirectory() as temp_dir:
             plugin.temp_dir = Path(temp_dir)
             source_path = plugin.temp_dir / "original.gif"
-            frames = [PILImage.new("RGB", (32, 32), color) for color in ("red", "blue")]
+            frames = [
+                PILImage.new("RGB", (8, 8), "red" if index % 2 else "blue")
+                for index in range(301)
+            ]
             try:
                 frames[0].save(
                     source_path, save_all=True, append_images=frames[1:], duration=100
@@ -483,18 +555,15 @@ class DirectImageConfigTests(unittest.TestCase):
                 for frame in frames:
                     frame.close()
 
-            for limit, value, expected in (
-                ("MAX_IMAGE_PIXELS", 100, "图片尺寸 32×32"),
-                ("MAX_ANIMATION_FRAMES", 1, "动图有 2 帧"),
-                ("MAX_ANIMATION_PIXELS", 1024, "累计像素"),
-            ):
-                with (
-                    self.subTest(limit=limit),
-                    patch.object(self.main, "MAX_IMAGE_BYTES", 1),
-                    patch.object(self.main, limit, value),
-                    self.assertRaisesRegex(self.main.ImageCompressionError, expected),
-                ):
-                    plugin._compress_image_to_webp(str(source_path))
+            with source_path.open("ab") as image_file:
+                image_file.truncate(self.main.MAX_IMAGE_BYTES + 1)
+
+            result = plugin._compress_image_to_webp(str(source_path))
+
+            self.assertLessEqual(Path(result).stat().st_size, self.main.MAX_IMAGE_BYTES)
+            with PILImage.open(result) as image:
+                self.assertEqual(image.format, "WEBP")
+                self.assertEqual(image.n_frames, 301)
 
     def test_missing_webp_encoder_has_specific_error(self):
         plugin = self.main.DirectImageTriggerPlugin(object())
